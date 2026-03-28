@@ -51,8 +51,10 @@ fi
 nginx -t
 systemctl reload nginx
 echo "OK: nginx reloaded"
-curl -sS -m 5 http://127.0.0.1/booking-service/health || true
-echo
-curl -sS -m 5 http://127.0.0.1/sms-auth-service/health || true
-echo
+code=$(curl -sS -o /dev/null -w "%{http_code}" -m 8 http://127.0.0.1/booking-service/health || echo "000")
+echo "booking-service/health HTTP $code"
+rooms=$(curl -sS -o /dev/null -w "%{http_code}" -m 8 http://127.0.0.1/booking-service/api/rooms || echo "000")
+echo "booking-service/api/rooms HTTP $rooms (ожидается 401; 404 = regex /api/ перехватывает — нужен ^~ в сниппете)"
+code2=$(curl -sS -o /dev/null -w "%{http_code}" -m 8 http://127.0.0.1/sms-auth-service/health || echo "000")
+echo "sms-auth-service/health HTTP $code2"
 REMOTE

@@ -15,6 +15,7 @@ import {ssoLogin} from '@actions/remote/session';
 import {fetchConfigAndLicense} from '@actions/remote/systems';
 import LocalConfig from '@assets/config.json';
 import AppVersion from '@components/app_version';
+import {ACADEMY_DEFAULT_SERVER_NAME, ACADEMY_DEFAULT_SERVER_URL} from '@constants/academy';
 import {Screens, Launch, DeepLink} from '@constants';
 import useDidMount from '@hooks/did_mount';
 import useNavButtonPressed from '@hooks/navigation_button_pressed';
@@ -50,8 +51,6 @@ interface ServerProps extends LaunchProps {
 }
 
 let cancelPing: undefined | (() => void);
-const ACADEMY_DEFAULT_SERVER_URL = 'https://vm268473.hosted-by-robovps.ru';
-const ACADEMY_DEFAULT_SERVER_NAME = 'Академия Образцовой';
 
 const defaultServerUrlMessage = defineMessage({
     id: 'mobile.server_url.empty',

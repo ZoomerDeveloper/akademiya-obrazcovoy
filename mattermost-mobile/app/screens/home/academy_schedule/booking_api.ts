@@ -1,6 +1,7 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import {getActiveServerUrl} from '@init/credentials';
 import {getBookingServiceUrl} from '@utils/academy_service';
 
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -40,6 +41,31 @@ export type BookingLogEntry = {
     created_at: number;
 }
 
+export type RoomInfo = {
+    id: string;
+    name: string;
+    area: number;
+    floor: number;
+    equipment: string[];
+    color: string;
+    sort_order?: number;
+}
+
+export type RecurringSlot = {
+    id: string;
+    room_id: string;
+    room_name: string;
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
+    purpose?: string;
+    note?: string;
+    is_curriculum?: number;
+    student_visible?: number;
+    created_by?: string;
+    created_at: number;
+}
+
 async function request<T>(
     method: string,
     path: string,
@@ -47,14 +73,23 @@ async function request<T>(
     token?: string,
     serverUrl?: string,
 ): Promise<T> {
-    const res = await fetch(`${getBookingServiceUrl(serverUrl)}${path}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(token ? {Authorization: `Bearer ${token}`} : {}),
-        },
-        ...(body ? {body: JSON.stringify(body)} : {}),
-    });
+    const base = getBookingServiceUrl(serverUrl);
+    let res: Response;
+    try {
+        res = await fetch(`${base}${path}`, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? {Authorization: `Bearer ${token}`} : {}),
+            },
+            ...(body ? {body: JSON.stringify(body)} : {}),
+        });
+    } catch (e) {
+        const hint = e instanceof Error ? e.message : String(e);
+        throw new Error(
+            `Сервис бронирования недоступен (${base}). Проверьте сеть и что сервис запущен. ${hint}`,
+        );
+    }
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({error: `HTTP ${res.status}`}));
@@ -68,6 +103,43 @@ async function request<T>(
 }
 
 export const bookingApi = {
+    getRooms: (token: string, serverUrl?: string) =>
+        request<RoomInfo[]>('GET', '/api/rooms', undefined, token, serverUrl),
+
+    createRoom: (
+        data: {
+            id: string;
+            name: string;
+            area: number;
+            floor: number;
+            equipment?: string[] | string;
+            color?: string;
+            sort_order?: number;
+        },
+        token: string,
+        serverUrl?: string,
+    ) => request<RoomInfo>('POST', '/api/rooms', data, token, serverUrl),
+
+    updateRoom: (
+        id: string,
+        data: {
+            name: string;
+            area: number;
+            floor: number;
+            equipment?: string[] | string;
+            color?: string;
+            sort_order?: number;
+        },
+        token: string,
+        serverUrl?: string,
+    ) => request<RoomInfo>('PUT', `/api/rooms/${encodeURIComponent(id)}`, data, token, serverUrl),
+
+    deleteRoom: (id: string, token: string, serverUrl?: string) =>
+        request<{ok: boolean}>('DELETE', `/api/rooms/${encodeURIComponent(id)}`, undefined, token, serverUrl),
+
+    getRecurringSlots: (token: string, serverUrl?: string) =>
+        request<RecurringSlot[]>('GET', '/api/recurring', undefined, token, serverUrl),
+
     createBooking: (data: {
         room_id: string;
         room_name: string;

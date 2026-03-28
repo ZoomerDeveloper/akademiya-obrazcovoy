@@ -6,8 +6,11 @@
 #
 # Пути согласованы с mattermost-mobile/app/utils/academy_service.ts
 # (booking-service → :3001, sms-auth-service → :3002).
+#
+# ВАЖНО: префикс ^~ — иначе location ~ /api/ у Mattermost перехватывает
+# /booking-service/api/... (в URI есть подстрока "/api/") → 404 от MM.
 
-location /booking-service/ {
+location ^~ /booking-service/ {
     proxy_pass http://127.0.0.1:3001/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -16,7 +19,7 @@ location /booking-service/ {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
-location /sms-auth-service/ {
+location ^~ /sms-auth-service/ {
     proxy_pass http://127.0.0.1:3002/;
     proxy_http_version 1.1;
     proxy_set_header Host $host;

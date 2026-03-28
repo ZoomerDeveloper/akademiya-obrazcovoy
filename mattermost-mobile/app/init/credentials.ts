@@ -4,6 +4,7 @@
 import {Platform} from 'react-native';
 import * as KeyChain from 'react-native-keychain';
 
+import {ACADEMY_DEFAULT_SERVER_URL} from '@constants/academy';
 import DatabaseManager from '@database/manager';
 import {logWarning} from '@utils/log';
 import {getIOSAppGroupDetails} from '@utils/mattermost_managed';
@@ -40,6 +41,13 @@ export const getActiveServerUrl = async () => {
         }
 
         serverUrl = serverUrls[0];
+    }
+    if (!serverUrl) {
+        const creds = await getAllServerCredentials();
+        serverUrl = creds[0]?.serverUrl;
+    }
+    if (!serverUrl) {
+        serverUrl = ACADEMY_DEFAULT_SERVER_URL;
     }
     return serverUrl || undefined;
 };

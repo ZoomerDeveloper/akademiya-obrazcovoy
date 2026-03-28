@@ -11,6 +11,9 @@
 #
 # На сервере один раз: клон репо, read-only deploy key в GitHub, исполняемый /etc/academy/post-deploy.sh
 # с перезапуском pm2/systemd (см. DEPLOY_RUNBOOK.md → GitHub Actions).
+#
+# После post-deploy скрипт обновляет nginx-сниппет deploy/nginx-academy-microservices.include (^~ для /booking-service).
+# Нужен root или passwordless sudo на сервере; иначе шаг пропускается. Отключить: ACADEMY_SKIP_NGINX=1 в env на сервере.
 
 name: Academy deploy (VPS)
 

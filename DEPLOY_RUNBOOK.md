@@ -53,6 +53,14 @@ curl -sS "https://ВАШ_ДОМЕН/sms-auth-service/health"
 
 Оба ответа должны быть JSON с `"ok":true` (сервисы `booking_service` и `sms_auth` должны слушать 3001 и 3002 на localhost).
 
+Проверка API (должен быть **401** без токена, не **404**):
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" "https://ВАШ_ДОМЕН/booking-service/api/rooms"
+```
+
+Если health = 200, а `/api/rooms` = 404 — в конфиге Nginx для Mattermost, скорее всего, есть `location ~ …/api/…`, который перехватывает путь раньше. В сниппете из репозитория используется **`location ^~ /booking-service/`** (модификатор `^~`), чтобы микросервис имел приоритет над regex. Обновите include на сервере и перезагрузите nginx.
+
 ## Процесс релиза (чеклист)
 
 1. Остановить `booking_service` / `sms_auth` (graceful).

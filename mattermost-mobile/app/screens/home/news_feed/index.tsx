@@ -18,7 +18,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {fetchPostsForChannel} from '@actions/remote/post';
 import CompassIcon from '@components/compass_icon';
-import {useServerUrl} from '@context/server';
+import {useResolvedServerUrl} from '@hooks/use_resolved_server_url';
 import {useTheme} from '@context/theme';
 import {observeCurrentTeamId} from '@queries/servers/system';
 import {observeCurrentUser} from '@queries/servers/user';
@@ -37,6 +37,8 @@ import CreateNewsPostModal from './create_news_post_modal';
 import type {WithDatabaseArgs} from '@typings/database/database';
 import type UserModel from '@typings/database/models/servers/user';
 
+// Сервер: каналы `novosti-studentam` (O) и `novosti-sotrudnikam` (P) — setup_academy.sh.
+// Участники приватной ленты сотрудников должны быть в канале; доступ к вкладке — team_admin и др. или ACADEMY_STAFF_NEWS_EXTRA_ROLE_NAMES.
 const STUDENT_CHANNEL = 'novosti-studentam';
 const STAFF_CHANNEL = 'novosti-sotrudnikam';
 
@@ -159,20 +161,6 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
         color: theme.centerChannelColor,
         fontWeight: '600',
     },
-    staffBadge: {
-        backgroundColor: changeOpacity(theme.sidebarTextActiveBorder, 0.1),
-        borderRadius: 3,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        marginLeft: 5,
-    },
-    staffBadgeText: {
-        fontSize: 9,
-        color: theme.sidebarTextActiveBorder,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-        letterSpacing: 0.3,
-    },
     list: {
         flex: 1,
     },
@@ -259,7 +247,7 @@ function getGreeting(): string {
 
 function NewsFeedScreen({currentUser, teamId}: Props) {
     const theme = useTheme();
-    const serverUrl = useServerUrl();
+    const serverUrl = useResolvedServerUrl();
     const insets = useSafeAreaInsets();
     const style = getStyleSheet(theme);
 
@@ -288,12 +276,19 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
 
     const roleFlags = useMemo(() => getAcademyRoleFlags(currentUser?.roles), [currentUser?.roles]);
     const isStaff = roleFlags.isStaff;
+    const canSeeStaffNewsFeed = roleFlags.canSeeStaffNewsFeed;
     const isSystemAdmin = roleFlags.isSystemAdmin;
 
     const visibleTabs = useMemo(
-        () => (isStaff ? TABS : TABS.filter((t) => t.key === STUDENT_CHANNEL)),
-        [isStaff],
+        () => (canSeeStaffNewsFeed ? TABS : TABS.filter((t) => t.key === STUDENT_CHANNEL)),
+        [canSeeStaffNewsFeed],
     );
+
+    useEffect(() => {
+        if (!canSeeStaffNewsFeed && activeTab === STAFF_CHANNEL) {
+            setActiveTab(STUDENT_CHANNEL);
+        }
+    }, [canSeeStaffNewsFeed, activeTab]);
 
     useEffect(() => {
         let cancelled = false;
@@ -349,6 +344,13 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
         fetchChannelPosts(activeTab);
     }, [activeTab, fetchChannelPosts]);
 
+    useEffect(() => {
+        if (!canSeeStaffNewsFeed || !sessionToken || !teamId) {
+            return;
+        }
+        fetchChannelPosts(STAFF_CHANNEL);
+    }, [canSeeStaffNewsFeed, sessionToken, teamId, fetchChannelPosts]);
+
     const handleRefresh = useCallback(() => {
         fetchedRef.current.delete(activeTab);
         fetchChannelPosts(activeTab);
@@ -360,7 +362,11 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
             return;
         }
         try {
-            const resp = await fetchWithRetry(`${getBookingServiceUrl(serverUrl)}/api/post-drafts?status=pending`, {
+            const bookingBase = getBookingServiceUrl(serverUrl);
+            if (!bookingBase) {
+                return;
+            }
+            const resp = await fetchWithRetry(`${bookingBase}/api/post-drafts?status=pending`, {
                 headers: {Authorization: `Bearer ${sessionToken}`},
             }, {retries: 1, timeoutMs: 8000});
             if (!resp.ok) {
@@ -531,17 +537,15 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
                             onPress={() => setActiveTab(tab.key)}
                             accessibilityRole='tab'
                             accessibilityState={{selected: isActive}}
+                            accessibilityLabel={
+                                tab.key === STAFF_CHANNEL
+                                    ? 'Сотрудникам, внутренние новости'
+                                    : tab.label
+                            }
                         >
-                            <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                                <Text style={[style.tabText, isActive && style.tabTextActive]}>
-                                    {tab.label}
-                                </Text>
-                                {tab.key === STAFF_CHANNEL && (
-                                    <View style={style.staffBadge}>
-                                        <Text style={style.staffBadgeText}>{'staff'}</Text>
-                                    </View>
-                                )}
-                            </View>
+                            <Text style={[style.tabText, isActive && style.tabTextActive]}>
+                                {tab.label}
+                            </Text>
                         </TouchableOpacity>
                     );
                 })}

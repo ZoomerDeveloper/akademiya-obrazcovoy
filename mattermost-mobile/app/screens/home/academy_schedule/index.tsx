@@ -18,7 +18,7 @@
 import {withDatabase, withObservables} from '@nozbe/watermelondb/react';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
-    Alert,
+    ActivityIndicator,
     Modal,
     Platform,
     SafeAreaView,
@@ -31,7 +31,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import CompassIcon from '@components/compass_icon';
-import {useServerUrl} from '@context/server';
+import {useResolvedServerUrl} from '@hooks/use_resolved_server_url';
 import {useTheme} from '@context/theme';
 import {getServerCredentials} from '@init/credentials';
 import {observeCurrentUser} from '@queries/servers/user';
@@ -39,9 +39,10 @@ import {getAcademyRoleFlags} from '@utils/academy_roles';
 import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
 
 import AdminBookingsScreen from './admin_bookings';
-import {bookingApi, type Booking} from './booking_api';
+import {bookingApi, type Booking, type RecurringSlot} from './booking_api';
 import BookingForm from './booking_form';
 import MyBookingsScreen from './my_bookings';
+import RoomsAdminScreen from './rooms_admin';
 
 import type {WithDatabaseArgs} from '@typings/database/database';
 import type UserModel from '@typings/database/models/servers/user';
@@ -101,7 +102,108 @@ const TIME_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00
 
 type SlotStatus = 'free' | 'occupied' | 'my';
 
-// Генерируем случайное расписание для демо
+/** Локальная календарная дата YYYY-MM-DD (без сдвига UTC). */
+function toISODate(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function addDaysDate(d: Date, days: number): Date {
+    const copy = new Date(d);
+    copy.setDate(copy.getDate() + days);
+    return copy;
+}
+
+/** Понедельник той же календарной недели (пн–вс), локальная полночь не нужна — только дата */
+function getWeekMonday(d: Date): Date {
+    const copy = new Date(d);
+    copy.setHours(0, 0, 0, 0);
+    const day = copy.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    copy.setDate(copy.getDate() + diff);
+    return copy;
+}
+
+function timeToMinutes(t: string): number {
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+}
+
+function endOfHourSlot(startTime: string): string {
+    const endMin = timeToMinutes(startTime) + 60;
+    const eh = Math.floor(endMin / 60);
+    const em = endMin % 60;
+    return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
+
+function rangesOverlap(a0: string, a1: string, b0: string, b1: string): boolean {
+    return timeToMinutes(a0) < timeToMinutes(b1) && timeToMinutes(a1) > timeToMinutes(b0);
+}
+
+/** Пн=0 … Вс=6, как в recurring_bookings.day_of_week */
+function dayOfWeekMon0(d: Date): number {
+    return (d.getDay() + 6) % 7;
+}
+
+function buildWeekSchedule(
+    roomId: string,
+    userId: string,
+    weekMonday: Date,
+    bookings: Booking[],
+    recurring: RecurringSlot[],
+): Record<string, SlotStatus> {
+    const schedule: Record<string, SlotStatus> = {};
+    for (let di = 0; di < WEEK_DAYS.length; di++) {
+        const dayDate = addDaysDate(weekMonday, di);
+        const dateStr = toISODate(dayDate);
+        const dow = dayOfWeekMon0(dayDate);
+
+        for (const time of TIME_SLOTS) {
+            const key = `${WEEK_DAYS[di]}-${time}`;
+            const slotEnd = endOfHourSlot(time);
+            let hasMy = false;
+            let hasOcc = false;
+
+            for (const b of bookings) {
+                if (b.room_id !== roomId || b.date !== dateStr) {
+                    continue;
+                }
+                if (b.status !== 'pending' && b.status !== 'approved') {
+                    continue;
+                }
+                if (rangesOverlap(b.start_time, b.end_time, time, slotEnd)) {
+                    if (b.user_id === userId) {
+                        hasMy = true;
+                    } else {
+                        hasOcc = true;
+                    }
+                }
+            }
+
+            for (const r of recurring) {
+                if (r.room_id !== roomId || r.day_of_week !== dow) {
+                    continue;
+                }
+                if (rangesOverlap(r.start_time, r.end_time, time, slotEnd)) {
+                    hasOcc = true;
+                }
+            }
+
+            if (hasMy) {
+                schedule[key] = 'my';
+            } else if (hasOcc) {
+                schedule[key] = 'occupied';
+            } else {
+                schedule[key] = 'free';
+            }
+        }
+    }
+    return schedule;
+}
+
+// Генерируем случайное расписание для демо (fallback)
 function generateSchedule(roomId: string): Record<string, SlotStatus> {
     const seed = roomId.charCodeAt(1);
     const schedule: Record<string, SlotStatus> = {};
@@ -354,22 +456,82 @@ const getGridStyle = makeStyleSheetFromTheme((theme: Theme) => ({
     requestBtnText: {color: theme.buttonColor, fontSize: 16, fontWeight: '700'},
 }));
 
-function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
+function RoomScheduleModal({room, onClose, theme, onRequestSlot, serverUrl, sessionToken, userId}: {
     room: ClassRoom;
     onClose: () => void;
     theme: Theme;
-    isStaff: boolean;
-    onRequestSlot: (room: ClassRoom, start: string, end: string) => void;
+    onRequestSlot: (r: ClassRoom, slot?: {date: string; start?: string; end?: string}) => void;
+    serverUrl?: string;
+    sessionToken: string;
+    userId: string;
 }) {
     const style = getGridStyle(theme);
-    const schedule = useMemo(() => generateSchedule(room.id), [room.id]);
+    const [weekOffset, setWeekOffset] = useState(0);
+    const weekMonday = useMemo(() => {
+        const base = getWeekMonday(new Date());
+        return addDaysDate(base, weekOffset * 7);
+    }, [weekOffset]);
 
-    const handleRequest = useCallback((time: string) => {
-        const [hour, minute] = time.split(':').map(Number);
-        const endHour = Math.min(23, hour + 1);
-        const end = `${String(endHour).padStart(2, '0')}:${String(Number.isNaN(minute) ? 0 : minute).padStart(2, '0')}`;
-        onRequestSlot(room, time, end);
-    }, [onRequestSlot, room]);
+    const [schedule, setSchedule] = useState<Record<string, SlotStatus>>(() => generateSchedule(room.id));
+    const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!sessionToken) {
+            setSchedule(generateSchedule(room.id));
+            setLoadError(null);
+            return;
+        }
+        let cancelled = false;
+        const load = async () => {
+            setLoading(true);
+            setLoadError(null);
+            try {
+                const mon = weekMonday;
+                const sat = addDaysDate(mon, 5);
+                const from = toISODate(mon);
+                const to = toISODate(sat);
+                const [bookings, recurring] = await Promise.all([
+                    bookingApi.getAllBookings(
+                        {room_id: room.id, date_from: from, date_to: to, student_only: 0},
+                        sessionToken,
+                        serverUrl,
+                    ),
+                    bookingApi.getRecurringSlots(sessionToken, serverUrl),
+                ]);
+                if (cancelled) {
+                    return;
+                }
+                const rec = Array.isArray(recurring) ? recurring.filter((x) => x.room_id === room.id) : [];
+                const rows = Array.isArray(bookings) ? bookings : [];
+                setSchedule(buildWeekSchedule(room.id, userId, mon, rows, rec));
+            } catch (e) {
+                if (!cancelled) {
+                    setLoadError(e instanceof Error ? e.message : 'Ошибка загрузки');
+                    setSchedule(generateSchedule(room.id));
+                }
+            } finally {
+                if (!cancelled) {
+                    setLoading(false);
+                }
+            }
+        };
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [room.id, serverUrl, sessionToken, userId, weekMonday]);
+
+    const weekLabel = useMemo(() => {
+        const a = toISODate(weekMonday);
+        const b = toISODate(addDaysDate(weekMonday, 5));
+        return `${a.slice(8, 10)}.${a.slice(5, 7)} — ${b.slice(8, 10)}.${b.slice(5, 7)}`;
+    }, [weekMonday]);
+
+    const handleCellPress = useCallback((dayIndex: number, time: string) => {
+        const dateStr = toISODate(addDaysDate(weekMonday, dayIndex));
+        onRequestSlot(room, {date: dateStr, start: time, end: endOfHourSlot(time)});
+    }, [onRequestSlot, room, weekMonday]);
 
     return (
         <SafeAreaView style={style.modalContainer}>
@@ -391,11 +553,44 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
                     >
                         {room.name}
                     </Text>
-                    <Text style={style.modalMeta}>{`${room.area} м²  •  ${room.floor} этаж`}</Text>
+                    <Text style={style.modalMeta}>{`${room.area} м²  •  ${room.floor} этаж  •  ${weekLabel}`}</Text>
                 </View>
             </View>
 
+            <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 16}}>
+                <TouchableOpacity
+                    onPress={() => setWeekOffset((w) => w - 1)}
+                    hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                >
+                    <CompassIcon
+                        name='chevron-left'
+                        size={22}
+                        color={theme.centerChannelColor}
+                    />
+                </TouchableOpacity>
+                <Text style={{fontSize: 13, color: changeOpacity(theme.centerChannelColor, 0.55)}}>
+                    {'Неделя'}
+                </Text>
+                <TouchableOpacity
+                    onPress={() => setWeekOffset((w) => w + 1)}
+                    hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                >
+                    <CompassIcon
+                        name='chevron-right'
+                        size={22}
+                        color={theme.centerChannelColor}
+                    />
+                </TouchableOpacity>
+            </View>
+
             <View style={style.legend}>
+                {loading && (
+                    <ActivityIndicator
+                        size='small'
+                        color={theme.sidebarTextActiveBorder}
+                        style={{marginRight: 8}}
+                    />
+                )}
                 <View style={style.legendItem}>
                     <View style={[style.legendDot, {backgroundColor: changeOpacity('#3db887', 0.4)}]}/>
                     <Text style={style.legendText}>{'Свободно'}</Text>
@@ -409,6 +604,13 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
                     <Text style={style.legendText}>{'Мои занятия'}</Text>
                 </View>
             </View>
+            {loadError ? (
+                <View style={{paddingHorizontal: 16, paddingBottom: 8}}>
+                    <Text style={{fontSize: 12, color: changeOpacity(theme.centerChannelColor, 0.55)}}>
+                        {loadError}
+                    </Text>
+                </View>
+            ) : null}
 
             <ScrollView
                 style={style.gridScroll}
@@ -420,18 +622,24 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
                     showsHorizontalScrollIndicator={false}
                 >
                     <View style={style.grid}>
-                        {/* Заголовки дней */}
                         <View style={style.dayHeaderRow}>
-                            {WEEK_DAYS.map((day) => (
-                                <View
-                                    key={day}
-                                    style={style.dayHeader}
-                                >
-                                    <Text style={style.dayHeaderText}>{day}</Text>
-                                </View>
-                            ))}
+                            {WEEK_DAYS.map((day, di) => {
+                                const d = addDaysDate(weekMonday, di);
+                                const dd = String(d.getDate()).padStart(2, '0');
+                                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                                return (
+                                    <View
+                                        key={day}
+                                        style={style.dayHeader}
+                                    >
+                                        <Text style={style.dayHeaderText}>{day}</Text>
+                                        <Text style={{fontSize: 10, color: changeOpacity(theme.centerChannelColor, 0.35)}}>
+                                            {`${dd}.${mm}`}
+                                        </Text>
+                                    </View>
+                                );
+                            })}
                         </View>
-                        {/* Строки по времени */}
                         {TIME_SLOTS.map((time) => (
                             <View
                                 key={time}
@@ -440,7 +648,7 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
                                 <View style={style.timeLabel}>
                                     <Text style={style.timeLabelText}>{time}</Text>
                                 </View>
-                                {WEEK_DAYS.map((day) => {
+                                {WEEK_DAYS.map((day, di) => {
                                     const key = `${day}-${time}`;
                                     const status = schedule[key];
                                     const isFree = status === 'free';
@@ -453,7 +661,7 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
                                                 status === 'occupied' && style.slotOccupied,
                                                 status === 'my' && style.slotMy,
                                             ]}
-                                            onPress={isFree ? () => handleRequest(time) : undefined}
+                                            onPress={isFree ? () => handleCellPress(di, time) : undefined}
                                             activeOpacity={isFree ? 0.7 : 1}
                                             disabled={!isFree}
                                         >
@@ -469,7 +677,7 @@ function RoomScheduleModal({room, onClose, theme, isStaff, onRequestSlot}: {
 
             <TouchableOpacity
                 style={style.requestBtn}
-                onPress={() => onRequestSlot(room, '10:00', '11:00')}
+                onPress={() => onRequestSlot(room)}
             >
                 <Text style={style.requestBtnText}>{'Подать заявку на занятие'}</Text>
             </TouchableOpacity>
@@ -485,7 +693,7 @@ type Props = {
 
 function AcademyScheduleScreen({currentUser}: Props) {
     const theme = useTheme();
-    const serverUrl = useServerUrl();
+    const serverUrl = useResolvedServerUrl();
     const insets = useSafeAreaInsets();
     const style = getStyleSheet(theme);
 
@@ -498,8 +706,10 @@ function AcademyScheduleScreen({currentUser}: Props) {
     const [showBookingForm, setShowBookingForm] = useState(false);
     const [showMyBookings, setShowMyBookings] = useState(false);
     const [showAdminPanel, setShowAdminPanel] = useState(false);
+    const [showRoomsAdmin, setShowRoomsAdmin] = useState(false);
     const [bookingRoom, setBookingRoom] = useState<ClassRoom | null>(null);
-    const [preselectedSlot, setPreselectedSlot] = useState<{start: string; end: string} | null>(null);
+    const [bookingFormSlot, setBookingFormSlot] = useState<{date: string; start?: string; end?: string} | null>(null);
+    const [classrooms, setClassrooms] = useState<ClassRoom[]>(CLASSROOMS);
 
     const roleFlags = useMemo(() => getAcademyRoleFlags(currentUser?.roles), [currentUser?.roles]);
     const isStaff = roleFlags.isStaff;
@@ -523,6 +733,39 @@ function AcademyScheduleScreen({currentUser}: Props) {
             cancelled = true;
         };
     }, [serverUrl, currentUser]);
+
+    const reloadClassrooms = useCallback(async () => {
+        if (!sessionToken) {
+            return;
+        }
+        try {
+            const rows = await bookingApi.getRooms(sessionToken, serverUrl);
+            if (!Array.isArray(rows)) {
+                setClassrooms(CLASSROOMS);
+                return;
+            }
+            if (rows.length === 0) {
+                setClassrooms([]);
+                return;
+            }
+            setClassrooms(
+                rows.map((r) => ({
+                    id: r.id,
+                    name: r.name,
+                    area: r.area,
+                    floor: r.floor,
+                    equipment: Array.isArray(r.equipment) ? r.equipment : [],
+                    color: r.color || '#555555',
+                })),
+            );
+        } catch {
+            setClassrooms(CLASSROOMS);
+        }
+    }, [sessionToken, serverUrl]);
+
+    useEffect(() => {
+        reloadClassrooms();
+    }, [reloadClassrooms]);
 
     useEffect(() => {
         FILTERS_CACHE.calendarView = calendarView;
@@ -553,13 +796,6 @@ function AcademyScheduleScreen({currentUser}: Props) {
         return d.toLocaleDateString('ru-RU', {day: 'numeric', month: 'long'});
     };
 
-    const toISODate = (d: Date) => d.toISOString().slice(0, 10);
-    const addDays = (d: Date, days: number) => {
-        const copy = new Date(d);
-        copy.setDate(copy.getDate() + days);
-        return copy;
-    };
-
     useEffect(() => {
         if (!sessionToken) {
             setHallApiEvents([]);
@@ -569,7 +805,7 @@ function AcademyScheduleScreen({currentUser}: Props) {
         const loadHallEvents = async () => {
             try {
                 const from = new Date();
-                const to = calendarView === 'week' ? addDays(from, 6) : addDays(from, 30);
+                const to = calendarView === 'week' ? addDaysDate(from, 6) : addDaysDate(from, 30);
                 const rows = await bookingApi.getAllBookings(
                     {
                         status: 'approved',
@@ -615,10 +851,10 @@ function AcademyScheduleScreen({currentUser}: Props) {
 
     const filteredClassrooms = useMemo(() => {
         if (floorFilter === 'all') {
-            return CLASSROOMS;
+            return classrooms;
         }
-        return CLASSROOMS.filter((room) => room.floor === floorFilter);
-    }, [floorFilter]);
+        return classrooms.filter((room) => room.floor === floorFilter);
+    }, [classrooms, floorFilter]);
 
     const visibleHallEvents = useMemo(() => {
         const source = hallApiEvents.length > 0 ? hallApiEvents : HALL_EVENTS;
@@ -640,9 +876,13 @@ function AcademyScheduleScreen({currentUser}: Props) {
         return events;
     }, [calendarView, durationFilter, hallApiEvents, hallTypeFilter]);
 
-    const openBookingForm = useCallback((room: ClassRoom, start?: string, end?: string) => {
+    const openBookingForm = useCallback((room: ClassRoom, slot?: {date: string; start?: string; end?: string}) => {
         setBookingRoom(room);
-        setPreselectedSlot(start ? {start, end: end || ''} : null);
+        if (slot) {
+            setBookingFormSlot(slot);
+        } else {
+            setBookingFormSlot({date: toISODate(new Date())});
+        }
         setSelectedRoom(null);
         setShowBookingForm(true);
     }, []);
@@ -679,18 +919,32 @@ function AcademyScheduleScreen({currentUser}: Props) {
                         />
                     </TouchableOpacity>
                     {isStaff && (
-                        <TouchableOpacity
-                            onPress={() => setShowAdminPanel(true)}
-                            style={{padding: 8}}
-                            accessibilityLabel='Заявки администратора'
-                            hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
-                        >
-                            <CompassIcon
-                                name='application-cog'
-                                size={22}
-                                color={changeOpacity(theme.centerChannelColor, 0.6)}
-                            />
-                        </TouchableOpacity>
+                        <>
+                            <TouchableOpacity
+                                onPress={() => setShowRoomsAdmin(true)}
+                                style={{padding: 8}}
+                                accessibilityLabel='Справочник классов'
+                                hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                            >
+                                <CompassIcon
+                                    name='home-variant-outline'
+                                    size={22}
+                                    color={changeOpacity(theme.centerChannelColor, 0.6)}
+                                />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => setShowAdminPanel(true)}
+                                style={{padding: 8}}
+                                accessibilityLabel='Заявки администратора'
+                                hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                            >
+                                <CompassIcon
+                                    name='application-cog'
+                                    size={22}
+                                    color={changeOpacity(theme.centerChannelColor, 0.6)}
+                                />
+                            </TouchableOpacity>
+                        </>
                     )}
                 </View>
             </View>
@@ -934,8 +1188,10 @@ function AcademyScheduleScreen({currentUser}: Props) {
                         room={selectedRoom}
                         onClose={() => setSelectedRoom(null)}
                         theme={theme}
-                        isStaff={isStaff}
-                        onRequestSlot={(room, start, end) => openBookingForm(room, start, end)}
+                        serverUrl={serverUrl}
+                        sessionToken={sessionToken}
+                        userId={userId}
+                        onRequestSlot={(room, slot) => openBookingForm(room, slot)}
                     />
                 </Modal>
             )}
@@ -948,10 +1204,11 @@ function AcademyScheduleScreen({currentUser}: Props) {
                     presentationStyle='fullScreen'
                 >
                     <BookingForm
+                        key={`${bookingRoom.id}-${bookingFormSlot?.date}-${bookingFormSlot?.start}-${bookingFormSlot?.end}`}
                         room={bookingRoom}
-                        preselectedDate={new Date().toISOString().slice(0, 10)}
-                        preselectedStart={preselectedSlot?.start}
-                        preselectedEnd={preselectedSlot?.end}
+                        preselectedDate={bookingFormSlot?.date ?? new Date().toISOString().slice(0, 10)}
+                        preselectedStart={bookingFormSlot?.start}
+                        preselectedEnd={bookingFormSlot?.end}
                         userId={userId}
                         userName={userName}
                         userEmail={userEmail}
@@ -982,6 +1239,23 @@ function AcademyScheduleScreen({currentUser}: Props) {
                         isStaff={isStaff}
                         theme={theme}
                         onClose={() => setShowMyBookings(false)}
+                    />
+                </Modal>
+            )}
+
+            {/* Справочник классов (только для staff) */}
+            {showRoomsAdmin && isStaff && (
+                <Modal
+                    visible={true}
+                    animationType='slide'
+                    presentationStyle='fullScreen'
+                >
+                    <RoomsAdminScreen
+                        userToken={sessionToken}
+                        serverUrl={serverUrl}
+                        theme={theme}
+                        onClose={() => setShowRoomsAdmin(false)}
+                        onSaved={reloadClassrooms}
                     />
                 </Modal>
             )}

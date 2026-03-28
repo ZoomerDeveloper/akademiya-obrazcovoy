@@ -112,6 +112,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_drafts_status ON post_drafts(status);
 `);
 
+// Классы / залы (справочник для мобильного клиента)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    area        REAL NOT NULL,
+    floor       INTEGER NOT NULL,
+    equipment   TEXT NOT NULL DEFAULT '[]',
+    color       TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
+const roomSeedCount = db.prepare('SELECT COUNT(*) AS c FROM rooms').get();
+if (!roomSeedCount || roomSeedCount.c === 0) {
+    const ins = db.prepare(`
+        INSERT INTO rooms (id, name, area, floor, equipment, color, sort_order)
+        VALUES (:id, :name, :area, :floor, :equipment, :color, :sort_order)
+    `);
+    const seed = [
+        {id: 'r1', name: 'Класс № 1', area: 24, floor: 1, equipment: JSON.stringify(['Рояль Steinway', 'Зеркала', 'Балетный станок']), color: '#1a1a35', sort_order: 1},
+        {id: 'r2', name: 'Класс № 2', area: 18, floor: 1, equipment: JSON.stringify(['Пианино Yamaha', 'Музыкальный центр']), color: '#2d4a22', sort_order: 2},
+        {id: 'r3', name: 'Класс № 3', area: 30, floor: 2, equipment: JSON.stringify(['Рояль Bösendorfer', 'Проектор', 'Экран']), color: '#8b4513', sort_order: 3},
+        {id: 'r4', name: 'Класс № 4', area: 20, floor: 2, equipment: JSON.stringify(['Пианино Kawai', 'Синтезатор']), color: '#6b3570', sort_order: 4},
+        {id: 'r5', name: 'Класс № 5', area: 22, floor: 3, equipment: JSON.stringify(['Рояль Steinway Junior', 'Звукоизоляция']), color: '#1a3a4a', sort_order: 5},
+        {id: 'r6', name: 'Репетиционный зал', area: 45, floor: 1, equipment: JSON.stringify(['Ударная установка', 'Усилители', 'Микрофоны']), color: '#3a1a1a', sort_order: 6},
+    ];
+    for (const row of seed) {
+        ins.run(row);
+    }
+}
+
 // ─────────────────────────── Подготовленные запросы ──────────────────────────
 // node:sqlite использует :param вместо @param
 
@@ -267,6 +299,37 @@ const stmts = {
     `),
 
     findDraftById: db.prepare(`SELECT * FROM post_drafts WHERE id = ?`),
+
+    listRooms: db.prepare(`
+        SELECT id, name, area, floor, equipment, color, sort_order
+        FROM rooms
+        ORDER BY sort_order ASC, id ASC
+    `),
+
+    getRoomById: db.prepare('SELECT * FROM rooms WHERE id = ?'),
+
+    insertRoom: db.prepare(`
+        INSERT INTO rooms (id, name, area, floor, equipment, color, sort_order)
+        VALUES (:id, :name, :area, :floor, :equipment, :color, :sort_order)
+    `),
+
+    updateRoom: db.prepare(`
+        UPDATE rooms
+        SET name = :name,
+            area = :area,
+            floor = :floor,
+            equipment = :equipment,
+            color = :color,
+            sort_order = :sort_order
+        WHERE id = :id
+    `),
+
+    deleteRoom: db.prepare('DELETE FROM rooms WHERE id = ?'),
+
+    countActiveBookingsForRoom: db.prepare(`
+        SELECT COUNT(*) AS cnt FROM bookings
+        WHERE room_id = ? AND status IN ('pending', 'approved')
+    `),
 
     updateDraftStatus: db.prepare(`
         UPDATE post_drafts

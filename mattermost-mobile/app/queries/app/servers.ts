@@ -62,8 +62,15 @@ export const getAllServers = async () => {
 export const getActiveServer = async () => {
     try {
         const servers = await getAllServers();
-        const server = servers?.filter((s) => s.identifier)?.reduce((a, b) => (b.lastActiveAt > a.lastActiveAt ? b : a));
-        return server;
+        const withId = (servers || []).filter((s) => s.identifier);
+        if (withId.length) {
+            return withId.reduce((a, b) => (b.lastActiveAt > a.lastActiveAt ? b : a));
+        }
+        const withUrl = (servers || []).filter((s) => s.url);
+        if (!withUrl.length) {
+            return undefined;
+        }
+        return withUrl.reduce((a, b) => (b.lastActiveAt > a.lastActiveAt ? b : a));
     } catch {
         return undefined;
     }

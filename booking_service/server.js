@@ -177,6 +177,135 @@ app.get('/api/bookings/:id', requireAuth, (req, res) => {
     res.json(booking);
 });
 
+// ─────────────────────────── GET /api/rooms ─────────────────────────────────
+// Справочник классов / залов
+
+app.get('/api/rooms', requireAuth, (req, res) => {
+    const rows = stmts.listRooms.all();
+    const out = rows.map((r) => {
+        let equipment = [];
+        try {
+            equipment = JSON.parse(r.equipment || '[]');
+            if (!Array.isArray(equipment)) {
+                equipment = [];
+            }
+        } catch {
+            equipment = [];
+        }
+        return {
+            id: r.id,
+            name: r.name,
+            area: r.area,
+            floor: r.floor,
+            equipment,
+            color: r.color || '#555555',
+            sort_order: r.sort_order ?? 0,
+        };
+    });
+    res.json(out);
+});
+
+// POST /api/rooms — добавить класс (админ)
+app.post('/api/rooms', requireAuth, (req, res) => {
+    const {id, name, area, floor, equipment, color, sort_order} = req.body || {};
+    if (!id || !name || area === undefined || area === null || floor === undefined || floor === null) {
+        return res.status(400).json({error: 'Обязательные поля: id, name, area, floor'});
+    }
+    const rid = String(id).trim();
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(rid)) {
+        return res.status(400).json({error: 'id: только латиница, цифры, _ и -, до 64 символов'});
+    }
+    if (stmts.getRoomById.get(rid)) {
+        return res.status(409).json({error: 'Класс с таким id уже есть'});
+    }
+    let equipJson = '[]';
+    if (Array.isArray(equipment)) {
+        equipJson = JSON.stringify(equipment.map((x) => String(x)));
+    } else if (typeof equipment === 'string') {
+        equipJson = JSON.stringify(equipment.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean));
+    }
+    const row = {
+        id: rid,
+        name: String(name).trim(),
+        area: Number(area),
+        floor: Math.floor(Number(floor)),
+        equipment: equipJson,
+        color: (color && String(color).trim()) || '#555555',
+        sort_order: sort_order !== undefined ? Math.floor(Number(sort_order)) : 999,
+    };
+    if (Number.isNaN(row.area) || row.area < 0) {
+        return res.status(400).json({error: 'Некорректная площадь'});
+    }
+    stmts.insertRoom.run(row);
+    const created = stmts.getRoomById.get(rid);
+    res.status(201).json({
+        id: created.id,
+        name: created.name,
+        area: created.area,
+        floor: created.floor,
+        equipment: JSON.parse(created.equipment || '[]'),
+        color: created.color || '#555555',
+        sort_order: created.sort_order ?? 0,
+    });
+});
+
+// PUT /api/rooms/:id — изменить класс
+app.put('/api/rooms/:id', requireAuth, (req, res) => {
+    const existing = stmts.getRoomById.get(req.params.id);
+    if (!existing) {
+        return res.status(404).json({error: 'Не найдено'});
+    }
+    const {name, area, floor, equipment, color, sort_order} = req.body || {};
+    if (!name || area === undefined || floor === undefined) {
+        return res.status(400).json({error: 'Обязательные поля: name, area, floor'});
+    }
+    let equipJson = existing.equipment || '[]';
+    if (equipment !== undefined) {
+        if (Array.isArray(equipment)) {
+            equipJson = JSON.stringify(equipment.map((x) => String(x)));
+        } else if (typeof equipment === 'string') {
+            equipJson = JSON.stringify(equipment.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean));
+        }
+    }
+    const row = {
+        id: req.params.id,
+        name: String(name).trim(),
+        area: Number(area),
+        floor: Math.floor(Number(floor)),
+        equipment: equipJson,
+        color: (color && String(color).trim()) || existing.color || '#555555',
+        sort_order: sort_order !== undefined ? Math.floor(Number(sort_order)) : (existing.sort_order ?? 0),
+    };
+    if (Number.isNaN(row.area) || row.area < 0) {
+        return res.status(400).json({error: 'Некорректная площадь'});
+    }
+    stmts.updateRoom.run(row);
+    const updated = stmts.getRoomById.get(req.params.id);
+    res.json({
+        id: updated.id,
+        name: updated.name,
+        area: updated.area,
+        floor: updated.floor,
+        equipment: JSON.parse(updated.equipment || '[]'),
+        color: updated.color || '#555555',
+        sort_order: updated.sort_order ?? 0,
+    });
+});
+
+// DELETE /api/rooms/:id — удалить (если нет активных броней)
+app.delete('/api/rooms/:id', requireAuth, (req, res) => {
+    const existing = stmts.getRoomById.get(req.params.id);
+    if (!existing) {
+        return res.status(404).json({error: 'Не найдено'});
+    }
+    const {cnt} = stmts.countActiveBookingsForRoom.get(req.params.id);
+    if (cnt > 0) {
+        return res.status(409).json({error: `Нельзя удалить: есть ${cnt} активных заявок (pending/approved)`});
+    }
+    stmts.deleteRoom.run(req.params.id);
+    res.json({ok: true});
+});
+
 // ─────────────────────────── GET /api/rooms/:roomId/slots ────────────────────
 // Занятые слоты класса на дату (для сетки)
 

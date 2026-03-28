@@ -31,7 +31,7 @@ import {logout} from '@actions/remote/session';
 import {Events, Launch, Screens} from '@constants';
 import CompassIcon from '@components/compass_icon';
 import ProfilePicture from '@components/profile_picture';
-import {useServerUrl} from '@context/server';
+import {useResolvedServerUrl} from '@hooks/use_resolved_server_url';
 import {useTheme} from '@context/theme';
 import {getServerCredentials} from '@init/credentials';
 import AdminPanelScreen from '../admin_panel';
@@ -357,7 +357,7 @@ function AcademyProfileScreen({currentUser}: Props) {
     const theme = useTheme();
     const insets = useSafeAreaInsets();
     const style = getStyleSheet(theme);
-    const serverUrl = useServerUrl();
+    const serverUrl = useResolvedServerUrl();
     const [showAdminPanel, setShowAdminPanel] = useState(false);
     const [lessonsModalVisible, setLessonsModalVisible] = useState(false);
     const [paymentsModalVisible, setPaymentsModalVisible] = useState(false);

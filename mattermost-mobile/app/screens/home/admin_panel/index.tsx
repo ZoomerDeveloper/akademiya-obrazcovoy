@@ -29,7 +29,7 @@ import {
 } from 'react-native';
 
 import CompassIcon from '@components/compass_icon';
-import {useServerUrl} from '@context/server';
+import {useResolvedServerUrl} from '@hooks/use_resolved_server_url';
 import {useTheme} from '@context/theme';
 import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
 
@@ -174,7 +174,7 @@ const COLORS = ['#1a1a35', '#2d4a22', '#8b4513', '#6b3570', '#1a3a4a', '#3a1a1a'
 
 function AdminPanelScreen({adminToken, adminId, onClose}: Props) {
     const theme = useTheme();
-    const serverUrl = useServerUrl();
+    const serverUrl = useResolvedServerUrl();
     const style = getStyleSheet(theme);
 
     const [users, setUsers] = useState<MMUser[]>([]);

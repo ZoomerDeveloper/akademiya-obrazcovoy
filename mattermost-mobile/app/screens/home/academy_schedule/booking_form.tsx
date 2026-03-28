@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import CompassIcon from '@components/compass_icon';
+import {getActiveServerUrl} from '@init/credentials';
 import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
 
 import {bookingApi, type AlternativeSlot} from './booking_api';
@@ -206,6 +207,17 @@ function BookingForm({
 
     const handleSubmit = useCallback(async () => {
         if (!canSubmit || loading) { return; }
+        let resolvedUrl = serverUrl?.trim() || '';
+        if (!resolvedUrl) {
+            resolvedUrl = (await getActiveServerUrl()) || '';
+        }
+        if (!resolvedUrl) {
+            Alert.alert(
+                'Нет адреса сервера',
+                'Не удалось определить URL Mattermost. Выйдите и войдите снова или обновите приложение.',
+            );
+            return;
+        }
         setLoading(true);
         setAlternatives([]);
         try {
@@ -220,7 +232,7 @@ function BookingForm({
                 end_time: endTime,
                 purpose,
                 is_curriculum: isCurriculum,
-            }, userToken, serverUrl);
+            }, userToken, resolvedUrl);
 
             Alert.alert(
                 '✅ Заявка подана',
