@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  mattermost-push-proxy:
+    image: mattermost/mattermost-push-proxy:latest
+    container_name: academy-mpns
+    restart: unless-stopped
+    ports:
+      - "8066:8066"
+    volumes:
+      - ./config.json:/home/user/mattermost-push-proxy/config/mattermost-push-proxy.json:ro
+      - ./AuthKey_S7HKCDV76S.p8:/home/user/mattermost-push-proxy/config/AuthKey_S7HKCDV76S.p8:ro
+    environment:
+      - TZ=Europe/Moscow
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8066/api/v1/send_push_notification"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

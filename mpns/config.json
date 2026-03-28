@@ -1,0 +1,40 @@
+{
+  "ListenAddress": ":8066",
+  "ThrottlePerSec": 300,
+  "ThrottleMemoryStoreSize": 50000,
+  "ThrottleVaryByHeader": "X-Forwarded-For",
+  "EnableMetrics": false,
+  "LogFileLocation": "",
+  "ApplePushSettings": [
+    {
+      "Type": "apple",
+      "ApplePushTopic": "ru.obrazcova.academy",
+      "ApplePushCertPrivate": "",
+      "ApplePushCertPassword": "",
+      "AppleAuthKeyFile": "/home/user/mattermost-push-proxy/config/AuthKey_S7HKCDV76S.p8",
+      "AppleAuthKeyID": "S7HKCDV76S",
+      "AppleTeamID": "YU5BZXZUS7",
+      "ApplePushUseDevelopment": false
+    },
+    {
+      "Type": "apple_rn",
+      "ApplePushTopic": "ru.obrazcova.academy",
+      "ApplePushCertPrivate": "",
+      "ApplePushCertPassword": "",
+      "AppleAuthKeyFile": "/home/user/mattermost-push-proxy/config/AuthKey_S7HKCDV76S.p8",
+      "AppleAuthKeyID": "S7HKCDV76S",
+      "AppleTeamID": "YU5BZXZUS7",
+      "ApplePushUseDevelopment": false
+    }
+  ],
+  "AndroidPushSettings": [
+    {
+      "Type": "android",
+      "AndroidApiKey": "REPLACE_WITH_FCM_SERVER_KEY"
+    },
+    {
+      "Type": "android_rn",
+      "AndroidApiKey": "REPLACE_WITH_FCM_SERVER_KEY"
+    }
+  ]
+}

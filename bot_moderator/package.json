@@ -1,0 +1,16 @@
+{
+  "name": "academy-moderator-bot",
+  "version": "1.0.0",
+  "description": "Бот-модератор readonly-каналов Академии Образцовой",
+  "main": "bot_moderator.js",
+  "scripts": {
+    "start": "node -r dotenv/config bot_moderator.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

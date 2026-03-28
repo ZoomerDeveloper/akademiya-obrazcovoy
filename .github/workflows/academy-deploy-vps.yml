@@ -1,0 +1,57 @@
+# Деплой на ваш VPS по SSH (ключ в секретах, пароль не нужен).
+# Секреты репозитория: Settings → Secrets and variables → Actions
+#
+#   ACADEMY_SSH_HOST          — IP или домен (например 185.71.196.254)
+#   ACADEMY_SSH_USER          — пользователь SSH (root или deploy)
+#   ACADEMY_SSH_PRIVATE_KEY   — полный текст приватного ключа (-----BEGIN ... OPENSSH PRIVATE KEY-----)
+#   ACADEMY_DEPLOY_PATH       — абсолютный путь к клону репозитория на сервере (например /root/Mattermost)
+#
+# Опционально:
+#   ACADEMY_SSH_PORT          — порт SSH, по умолчанию 22 (если не задан — используется 22)
+#
+# На сервере один раз: клон репо, read-only deploy key в GitHub, исполняемый /etc/academy/post-deploy.sh
+# с перезапуском pm2/systemd (см. DEPLOY_RUNBOOK.md → GitHub Actions).
+
+name: Academy deploy (VPS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Ветка для выкладки'
+        required: true
+        default: 'main'
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: academy-deploy-vps
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (для проверки наличия deploy-скрипта в ревизии)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.ref }}
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.ref_name }}
+        with:
+          host: ${{ secrets.ACADEMY_SSH_HOST }}
+          username: ${{ secrets.ACADEMY_SSH_USER }}
+          key: ${{ secrets.ACADEMY_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.ACADEMY_SSH_PORT != '' && secrets.ACADEMY_SSH_PORT || 22 }}
+          envs: DEPLOY_BRANCH
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.ACADEMY_DEPLOY_PATH }}"
+            export DEPLOY_BRANCH
+            bash deploy/github-remote-deploy.sh

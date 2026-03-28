@@ -1,0 +1,26 @@
+# Фрагмент для включения в блок server { } виртуального хоста Mattermost (443).
+# Скопируйте на сервер, например:
+#   sudo cp deploy/nginx-academy-microservices.include /etc/nginx/snippets/academy-microservices.conf
+# и внутри server { } добавьте:
+#   include snippets/academy-microservices.conf;
+#
+# Пути согласованы с mattermost-mobile/app/utils/academy_service.ts
+# (booking-service → :3001, sms-auth-service → :3002).
+
+location /booking-service/ {
+    proxy_pass http://127.0.0.1:3001/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /sms-auth-service/ {
+    proxy_pass http://127.0.0.1:3002/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
