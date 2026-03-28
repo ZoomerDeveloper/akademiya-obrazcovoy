@@ -1046,6 +1046,16 @@ const Login = ({onCustomizeHeader}: LoginProps) => {
                                         </form>
                                     )}
                                     {enableBaseLogin && (
+                                        <div style={{marginBottom: 12, textAlign: 'center'}}>
+                                            <Link
+                                                className='login-body-card-header-link'
+                                                to={`/login/sms${search}`}
+                                            >
+                                                {'Вход только по номеру телефона'}
+                                            </Link>
+                                        </div>
+                                    )}
+                                    {enableBaseLogin && (
                                         <SmsAuthPanel
                                             onLoginSuccess={handleSmsLoginSuccess}
                                             disabled={isWaiting}

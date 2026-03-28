@@ -159,6 +159,59 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
         marginTop: 2,
     },
 
+    profileNavRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 16,
+        paddingHorizontal: 4,
+    },
+    profileNavCard: {
+        flex: 1,
+        backgroundColor: theme.centerChannelBg,
+        borderRadius: 12,
+        paddingVertical: 14,
+        paddingHorizontal: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: changeOpacity(theme.centerChannelColor, 0.1),
+        alignItems: 'center',
+    },
+    profileNavTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: theme.centerChannelColor,
+        marginTop: 6,
+        textAlign: 'center',
+    },
+    profileNavSub: {
+        fontSize: 11,
+        color: changeOpacity(theme.centerChannelColor, 0.5),
+        marginTop: 2,
+        textAlign: 'center',
+    },
+    modalRoot: {
+        flex: 1,
+        backgroundColor: theme.centerChannelBg,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: changeOpacity(theme.centerChannelColor, 0.08),
+    },
+    modalTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: theme.centerChannelColor,
+    },
+    modalBody: {
+        flex: 1,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+    },
+
     // Секция
     section: {paddingHorizontal: 16, paddingTop: 20},
     sectionHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12},
@@ -306,6 +359,8 @@ function AcademyProfileScreen({currentUser}: Props) {
     const style = getStyleSheet(theme);
     const serverUrl = useServerUrl();
     const [showAdminPanel, setShowAdminPanel] = useState(false);
+    const [lessonsModalVisible, setLessonsModalVisible] = useState(false);
+    const [paymentsModalVisible, setPaymentsModalVisible] = useState(false);
 
     const roles = currentUser?.roles || '';
     const roleFlags = getAcademyRoleFlags(roles);
@@ -397,6 +452,7 @@ function AcademyProfileScreen({currentUser}: Props) {
     const todayLessons = lessons.filter((l) => l.isToday);
     const upcomingLessons = lessons.filter((l) => !l.isToday);
     const offCurriculumApproved = myBookings.filter((booking) => booking.is_curriculum === 0);
+    const curriculumApproved = myBookings.filter((booking) => booking.is_curriculum === 1);
     const hasRealBookings = bookingsLoaded && myBookings.length > 0;
     const paymentItems = useMemo(() => {
         return offCurriculumApproved.slice(0, 5).map((booking) => {
@@ -410,6 +466,10 @@ function AcademyProfileScreen({currentUser}: Props) {
             };
         });
     }, [offCurriculumApproved]);
+
+    const profileLessonsSubtitle = lessons.length > 0 ? `${lessons.length} записей` : 'Просмотр';
+    const profilePaymentsSubtitle =
+        offCurriculumApproved.length > 0 ? `${offCurriculumApproved.length} к оплате` : 'Только просмотр';
 
     const documentContracts = useMemo(() => ([
         {
@@ -605,6 +665,41 @@ function AcademyProfileScreen({currentUser}: Props) {
                     </View>
                 </View>
 
+                <View style={[style.hero, {paddingTop: 0, borderBottomWidth: 0}]}>
+                    <View style={style.profileNavRow}>
+                        <TouchableOpacity
+                            style={style.profileNavCard}
+                            onPress={() => setLessonsModalVisible(true)}
+                            accessibilityRole='button'
+                            accessibilityLabel='Мои занятия'
+                        >
+                            <CompassIcon
+                                name='calendar-month-outline'
+                                size={22}
+                                color={theme.sidebarTextActiveBorder}
+                            />
+                            <Text style={style.profileNavTitle}>{'Мои занятия'}</Text>
+                            <Text style={style.profileNavSub}>{profileLessonsSubtitle}</Text>
+                        </TouchableOpacity>
+                        {!isStaff && (
+                            <TouchableOpacity
+                                style={style.profileNavCard}
+                                onPress={() => setPaymentsModalVisible(true)}
+                                accessibilityRole='button'
+                                accessibilityLabel='Мои платежи'
+                            >
+                                <CompassIcon
+                                    name='credit-card-outline'
+                                    size={22}
+                                    color='#c4973b'
+                                />
+                                <Text style={style.profileNavTitle}>{'Мои платежи'}</Text>
+                                <Text style={style.profileNavSub}>{profilePaymentsSubtitle}</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                </View>
+
                 {/* Баннер оплаты (только для студентов) */}
                 {!isStaff && (
                     <View style={style.payBanner}>
@@ -730,6 +825,116 @@ function AcademyProfileScreen({currentUser}: Props) {
                     adminId={currentUser?.id || ''}
                     onClose={() => setShowAdminPanel(false)}
                 />
+            </Modal>
+
+            <Modal
+                visible={lessonsModalVisible}
+                animationType='slide'
+                presentationStyle='fullScreen'
+                onRequestClose={() => setLessonsModalVisible(false)}
+            >
+                <View style={[style.modalRoot, {paddingTop: insets.top}]}>
+                    <View style={style.modalHeader}>
+                        <Text style={style.modalTitle}>{'Мои занятия'}</Text>
+                        <TouchableOpacity
+                            onPress={() => setLessonsModalVisible(false)}
+                            hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}
+                        >
+                            <CompassIcon
+                                name='close'
+                                size={26}
+                                color={theme.centerChannelColor}
+                            />
+                        </TouchableOpacity>
+                    </View>
+                    <ScrollView
+                        style={style.modalBody}
+                        contentContainerStyle={{paddingBottom: insets.bottom + 24}}
+                    >
+                        <Text style={[style.paymentMeta, {marginBottom: 12}]}>
+                            {hasRealBookings
+                                ? 'Подтверждённые бронирования из сервиса Академии. При отсутствии данных показывается демо-расписание.'
+                                : 'Демонстрационное расписание. После одобрения заявок на классы список подтянется автоматически.'}
+                        </Text>
+                        {lessons.map(renderLesson)}
+                    </ScrollView>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={paymentsModalVisible}
+                animationType='slide'
+                presentationStyle='fullScreen'
+                onRequestClose={() => setPaymentsModalVisible(false)}
+            >
+                <View style={[style.modalRoot, {paddingTop: insets.top}]}>
+                    <View style={style.modalHeader}>
+                        <Text style={style.modalTitle}>{'Мои платежи'}</Text>
+                        <TouchableOpacity
+                            onPress={() => setPaymentsModalVisible(false)}
+                            hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}
+                        >
+                            <CompassIcon
+                                name='close'
+                                size={26}
+                                color={theme.centerChannelColor}
+                            />
+                        </TouchableOpacity>
+                    </View>
+                    <ScrollView
+                        style={style.modalBody}
+                        contentContainerStyle={{paddingBottom: insets.bottom + 24}}
+                    >
+                        <Text style={[style.sectionTitle, {marginBottom: 8, textTransform: 'none'}]}>
+                            {'Ежемесячный взнос за обучение'}
+                        </Text>
+                        <View style={style.paymentCard}>
+                            <Text style={style.paymentMeta}>
+                                {'Сумма и статус по договору доступны в бухгалтерии. Напоминания приходят в приложение за 7 и 1 день до 25-го числа.'}
+                            </Text>
+                        </View>
+
+                        {curriculumApproved.length > 0 && (
+                            <>
+                                <Text style={[style.sectionTitle, {marginTop: 16, marginBottom: 8, textTransform: 'none'}]}>
+                                    {'Учебные бронирования классов'}
+                                </Text>
+                                {curriculumApproved.map((b) => (
+                                    <View
+                                        key={`cur-${b.id}`}
+                                        style={style.paymentCard}
+                                    >
+                                        <Text style={style.paymentTitle}>{b.room_name}</Text>
+                                        <Text style={style.paymentMeta}>{`${b.date} · ${b.start_time}–${b.end_time}`}</Text>
+                                        <Text style={[style.paymentStatus, {color: theme.linkColor}]}>{'Включено в учебный процесс'}</Text>
+                                    </View>
+                                ))}
+                            </>
+                        )}
+
+                        <Text style={[style.sectionTitle, {marginTop: 16, marginBottom: 8, textTransform: 'none'}]}>
+                            {'Внеурочные / аренда'}
+                        </Text>
+                        {paymentItems.length > 0 ? (
+                            paymentItems.map((item) => (
+                                <View
+                                    key={item.id}
+                                    style={style.paymentCard}
+                                >
+                                    <Text style={style.paymentTitle}>{item.title}</Text>
+                                    <Text style={style.paymentMeta}>{item.meta}</Text>
+                                    <Text style={[style.paymentStatus, {color: item.statusColor}]}>{item.status}</Text>
+                                </View>
+                            ))
+                        ) : (
+                            <View style={style.paymentCard}>
+                                <Text style={style.paymentMeta}>
+                                    {'Нет активных начислений по внеурочным занятиям.'}
+                                </Text>
+                            </View>
+                        )}
+                    </ScrollView>
+                </View>
             </Modal>
         </View>
     );

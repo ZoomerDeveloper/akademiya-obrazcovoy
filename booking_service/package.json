@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node -r dotenv/config server.js",
-    "dev": "nodemon -r dotenv/config server.js"
+    "dev": "nodemon -r dotenv/config server.js",
+    "reminder:payment": "node scripts/run-payment-reminder.js",
+    "reminder:payment:urgent": "node scripts/run-payment-reminder.js urgent"
   },
   "dependencies": {
     "cors": "^2.8.5",

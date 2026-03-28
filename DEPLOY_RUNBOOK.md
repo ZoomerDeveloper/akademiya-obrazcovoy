@@ -91,6 +91,18 @@ pm2 restart academy-booking academy-sms 2>/dev/null || true
 # При необходимости: cd /path/to/repo/webapp && npm run build
 ```
 
+## Соответствие этапам заказчика (функционал в репозитории)
+
+| Этап | Где в продукте |
+|------|----------------|
+| 1. Мессенджер + веб + мобильное приложение | Mattermost server/web + `mattermost-mobile/`; публикация в App Store / Google Play — сборка и аккаунты разработчика (вне репо). |
+| 2. Вход email + телефон | Веб: `/login` (форма + блок SMS), отдельная страница **`/login/sms`**. Мобильный: стандартный вход MM + SMS через `sms_auth`. Роли — настройки Mattermost + `getAcademyRoleFlags` в приложении. |
+| 3. Лента новостей + push | Веб: **`/academy`** → вкладки новостей/афиши/FAQ. Мобильный: таб «Лента». Push: сервер MM + MPNS; новые посты приходят как уведомления MM. |
+| 4. Актовый зал / занятость | Веб: `/academy` → «Бронирование», «Расписание». Мобильный: таб «Занятость». API: `booking_service`. |
+| 5. Личный кабинет | Веб: `/academy` → «Личный кабинет» (профиль, мои оплаты, мои занятия). Мобильный: таб «Профиль» + **отдельные полноэкранные разделы «Мои занятия» и «Мои платежи»**. |
+| 6. Push по напоминанию об оплате | Воркер: `booking_service/jobs/payment_reminder_job.js` (cron в `server.js` + ручной запуск `npm run reminder:payment`). Сообщение уходит **в DM** от бота Mattermost → на телефон приходит push (если включены уведомления). Опционально: **`ACADEMY_NOTIFICATION_WEBHOOK_URL`** / **`ACADEMY_NOTIFICATION_WEBHOOK_SECRET`** — POST JSON для внешней цепочки. |
+| 7. Admin-panel | Веб: `/academy` → «Админ-панель» (пользователи, черновики, аналитика). Мобильный: модалка из профиля для staff. |
+
 ## Cron
 
-Напоминания об оплате встроены в `booking_service` (`node-cron`). Убедитесь, что процесс **один** и часовой пояс сервера соответствует ожиданиям (в коде задано 18 и 24 число 10:00 — уточните МСК/UTC при деплое).
+Напоминания об оплате: **`booking_service/jobs/payment_reminder_job.js`** + расписание в `server.js` (`node-cron`, 18 и 24 число 10:00 — уточните МСК/UTC). Ручной прогон: `cd booking_service && npm run reminder:payment` или `npm run reminder:payment:urgent`. Процесс сервиса должен быть **один**.

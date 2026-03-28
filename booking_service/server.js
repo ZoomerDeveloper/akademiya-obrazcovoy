@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const {v4: uuid} = require('uuid');
 const {db, stmts} = require('./db');
 const mm = require('./mattermost');
+const {sendPaymentReminderToStudents} = require('./jobs/payment_reminder_job');
 
 const PORT = process.env.PORT || 3001;
 const LOCK_TTL_MS = 5 * 60 * 1000; // 5 минут блокировки слота
@@ -391,38 +392,25 @@ cron.schedule('*/5 * * * *', () => {
 
 // Напоминание об оплате — 18 числа в 10:00 МСК (за 7 дней)
 cron.schedule('0 10 18 * *', async () => {
-    console.log('[cron] Напоминание об оплате (18-е число, -7 дней)...');
-    await sendPaymentReminderToStudents('7 дней');
+    console.log('[cron] Воркер: напоминание об оплате (18-е число, -7 дней)...');
+    try {
+        await sendPaymentReminderToStudents('7 дней');
+        console.log('[cron] Напоминания (7 дней) завершены');
+    } catch (err) {
+        console.error('[cron] Ошибка:', err);
+    }
 });
 
 // Финальное напоминание — 24 числа в 10:00 МСК (за 1 день)
 cron.schedule('0 10 24 * *', async () => {
-    console.log('[cron] Напоминание об оплате (24-е число, -1 день)...');
-    await sendPaymentReminderToStudents('1 день', true);
-});
-
-async function sendPaymentReminderToStudents(daysLeft, isUrgent = false) {
+    console.log('[cron] Воркер: напоминание об оплате (24-е число, -1 день)...');
     try {
-        const users = await mm.mmRequest(
-            'GET',
-            '/api/v4/users?per_page=200',
-            null,
-            process.env.MM_ADMIN_TOKEN,
-        );
-        const studentIds = Array.isArray(users)
-            ? users
-                .filter((u) => u.roles &&
-                    !u.roles.includes('team_admin') &&
-                    !u.roles.includes('system_admin') &&
-                    !u.roles.includes('system_bot'))
-                .map((u) => u.id)
-            : [];
-        await mm.sendPaymentReminder(studentIds, daysLeft, isUrgent);
-        console.log(`[cron] Напоминания отправлены ${studentIds.length} студентам (осталось: ${daysLeft})`);
+        await sendPaymentReminderToStudents('1 день', true);
+        console.log('[cron] Напоминания (1 день) завершены');
     } catch (err) {
         console.error('[cron] Ошибка:', err);
     }
-}
+});
 
 // Еженедельный дайджест для администраторов — каждый понедельник 09:00
 cron.schedule('0 9 * * 1', async () => {
