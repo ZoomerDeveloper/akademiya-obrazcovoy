@@ -57,4 +57,7 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.ACADEMY_DEPLOY_PATH }}"
             export DEPLOY_BRANCH
+            git fetch --prune origin "$DEPLOY_BRANCH"
+            git checkout "$DEPLOY_BRANCH"
+            git reset --hard "origin/$DEPLOY_BRANCH"
             bash deploy/github-remote-deploy.sh
