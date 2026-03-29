@@ -416,7 +416,7 @@ const getGridStyle = makeStyleSheetFromTheme((theme: Theme) => ({
     legendDot: {width: 12, height: 12, borderRadius: 3},
     legendText: {fontSize: 11, color: changeOpacity(theme.centerChannelColor, 0.6)},
     gridScroll: {flex: 1},
-    gridScrollContent: {paddingLeft: 64, paddingBottom: 20},
+    gridScrollContent: {paddingBottom: 20},
     grid: {flexDirection: 'column'},
     dayHeaderRow: {flexDirection: 'row', marginBottom: 4},
     dayHeader: {
@@ -620,6 +620,7 @@ function RoomScheduleModal({room, onClose, theme, onRequestSlot, serverUrl, sess
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{paddingLeft: 64}}
                 >
                     <View style={style.grid}>
                         <View style={style.dayHeaderRow}>
