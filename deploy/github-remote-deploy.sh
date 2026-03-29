@@ -164,4 +164,10 @@ print('patched')
 }
 academy_deploy_nginx_snippet
 
+# ── Seed данные для уроков (опционально) ──
+if [[ -f "$ROOT/booking_service/seed-lessons.js" ]] && [[ "${SEED_LESSONS:-0}" == "1" ]]; then
+    echo "→ seed lesson data"
+    (cd "$ROOT/booking_service" && export DB_PATH="$ROOT/booking_service/bookings.db" && node seed-lessons.js || echo "⚠ seed failed, continuing anyway")
+fi
+
 echo "→ OK"
