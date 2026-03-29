@@ -59,7 +59,13 @@ elif [[ -x deploy/post-deploy.local.sh ]]; then
     echo "→ deploy/post-deploy.local.sh (локальный хук в клоне)"
     deploy/post-deploy.local.sh
 else
-    echo "ℹ Нет хука перезапуска: запускаю встроенный fallback restart для microservices"
+    echo "ℹ Нет хука перезапуска"
+fi
+
+if [[ "${ACADEMY_SKIP_FALLBACK_RESTART:-0}" == "1" ]]; then
+    echo "ℹ ACADEMY_SKIP_FALLBACK_RESTART=1 — fallback restart пропущен"
+else
+    echo "→ fallback restart microservices"
     academy_restart_service_fallback "Booking Service" "$ROOT/booking_service" "server.js" "academy-booking" "/tmp/mm-booking.log"
     academy_restart_service_fallback "SMS Auth Service" "$ROOT/sms_auth" "server.js" "academy-sms" "/tmp/mm-smsauth.log"
 fi
