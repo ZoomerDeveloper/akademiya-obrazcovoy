@@ -23,6 +23,35 @@ for d in booking_service sms_auth; do
     fi
 done
 
+academy_restart_service_fallback() {
+    local NAME="$1"
+    local DIR="$2"
+    local ENTRY="$3"
+    local PM2_NAME="$4"
+    local LOG_FILE="$5"
+
+    if [[ ! -f "$DIR/$ENTRY" ]]; then
+        echo "ℹ $NAME: entry not found ($DIR/$ENTRY), skip"
+        return 0
+    fi
+
+    echo "→ restart $NAME"
+
+    if command -v pm2 >/dev/null 2>&1 && pm2 describe "$PM2_NAME" >/dev/null 2>&1; then
+        pm2 restart "$PM2_NAME"
+        echo "   $NAME: restarted via pm2 ($PM2_NAME)"
+        return 0
+    fi
+
+    # Fallback without pm2/systemd: restart node process by path pattern.
+    pkill -f "$DIR/$ENTRY" 2>/dev/null || true
+    (
+        cd "$DIR"
+        nohup node -r dotenv/config "$ENTRY" > "$LOG_FILE" 2>&1 &
+    )
+    echo "   $NAME: restarted via nohup (log: $LOG_FILE)"
+}
+
 if [[ -x /etc/academy/post-deploy.sh ]]; then
     echo "→ /etc/academy/post-deploy.sh"
     /etc/academy/post-deploy.sh
@@ -30,7 +59,9 @@ elif [[ -x deploy/post-deploy.local.sh ]]; then
     echo "→ deploy/post-deploy.local.sh (локальный хук в клоне)"
     deploy/post-deploy.local.sh
 else
-    echo "ℹ Нет хука перезапуска: создайте /etc/academy/post-deploy.sh (рекомендуется) или deploy/post-deploy.local.sh"
+    echo "ℹ Нет хука перезапуска: запускаю встроенный fallback restart для microservices"
+    academy_restart_service_fallback "Booking Service" "$ROOT/booking_service" "server.js" "academy-booking" "/tmp/mm-booking.log"
+    academy_restart_service_fallback "SMS Auth Service" "$ROOT/sms_auth" "server.js" "academy-sms" "/tmp/mm-smsauth.log"
 fi
 
 # ── Nginx: сниппет booking / sms (^~ чтобы не перехватывал location ~ /api/ у Mattermost) ──
