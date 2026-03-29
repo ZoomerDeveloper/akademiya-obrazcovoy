@@ -66,6 +66,70 @@ export type RecurringSlot = {
     created_at: number;
 }
 
+let roomsCrudSupported: boolean | null = null;
+
+function makeRoomsCrudUnsupportedError() {
+    return new Error(
+        'Управление классами недоступно: на сервере не включены маршруты /api/rooms. Обновите booking_service на сервере.',
+    );
+}
+
+const ROOM_FALLBACK_COLORS = [
+    '#1a1a35',
+    '#2d4a22',
+    '#6b3570',
+    '#1a3a4a',
+    '#8b4513',
+    '#3f3f3f',
+];
+
+function colorByRoomId(roomId: string) {
+    let hash = 0;
+    for (let i = 0; i < roomId.length; i++) {
+        hash = ((hash << 5) - hash) + roomId.charCodeAt(i);
+        hash |= 0;
+    }
+    return ROOM_FALLBACK_COLORS[Math.abs(hash) % ROOM_FALLBACK_COLORS.length];
+}
+
+function deriveRoomsFromBookings(bookings: Booking[]): RoomInfo[] {
+    const map = new Map<string, RoomInfo>();
+    for (const b of bookings) {
+        const roomId = (b.room_id || '').trim();
+        if (!roomId || map.has(roomId)) {
+            continue;
+        }
+        map.set(roomId, {
+            id: roomId,
+            name: (b.room_name || roomId).trim(),
+            area: 0,
+            floor: 1,
+            equipment: [],
+            color: colorByRoomId(roomId),
+            sort_order: 999,
+        });
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+async function getRoomsWithFallback(token: string, serverUrl?: string): Promise<RoomInfo[]> {
+    try {
+        const rooms = await request<RoomInfo[]>('GET', '/api/rooms', undefined, token, serverUrl);
+        roomsCrudSupported = true;
+        return rooms;
+    } catch (e) {
+        const status = (e as {status?: number})?.status;
+        if (status !== 404) {
+            throw e;
+        }
+
+        roomsCrudSupported = false;
+        const bookings = await request<Booking[]>('GET', '/api/bookings', undefined, token, serverUrl);
+        return deriveRoomsFromBookings(Array.isArray(bookings) ? bookings : []);
+    }
+}
+
 async function request<T>(
     method: string,
     path: string,
@@ -104,7 +168,9 @@ async function request<T>(
 
 export const bookingApi = {
     getRooms: (token: string, serverUrl?: string) =>
-        request<RoomInfo[]>('GET', '/api/rooms', undefined, token, serverUrl),
+        getRoomsWithFallback(token, serverUrl),
+
+    getRoomsCrudSupportState: () => roomsCrudSupported,
 
     createRoom: (
         data: {
@@ -118,7 +184,18 @@ export const bookingApi = {
         },
         token: string,
         serverUrl?: string,
-    ) => request<RoomInfo>('POST', '/api/rooms', data, token, serverUrl),
+    ) => {
+        if (roomsCrudSupported === false) {
+            return Promise.reject(makeRoomsCrudUnsupportedError());
+        }
+        return request<RoomInfo>('POST', '/api/rooms', data, token, serverUrl).catch((e: unknown) => {
+            if ((e as {status?: number})?.status === 404) {
+                roomsCrudSupported = false;
+                throw makeRoomsCrudUnsupportedError();
+            }
+            throw e;
+        });
+    },
 
     updateRoom: (
         id: string,
@@ -132,10 +209,29 @@ export const bookingApi = {
         },
         token: string,
         serverUrl?: string,
-    ) => request<RoomInfo>('PUT', `/api/rooms/${encodeURIComponent(id)}`, data, token, serverUrl),
+    ) => {
+        if (roomsCrudSupported === false) {
+            return Promise.reject(makeRoomsCrudUnsupportedError());
+        }
+        return request<RoomInfo>('PUT', `/api/rooms/${encodeURIComponent(id)}`, data, token, serverUrl).catch((e: unknown) => {
+            if ((e as {status?: number})?.status === 404) {
+                roomsCrudSupported = false;
+                throw makeRoomsCrudUnsupportedError();
+            }
+            throw e;
+        });
+    },
 
     deleteRoom: (id: string, token: string, serverUrl?: string) =>
-        request<{ok: boolean}>('DELETE', `/api/rooms/${encodeURIComponent(id)}`, undefined, token, serverUrl),
+        (roomsCrudSupported === false
+            ? Promise.reject(makeRoomsCrudUnsupportedError())
+            : request<{ok: boolean}>('DELETE', `/api/rooms/${encodeURIComponent(id)}`, undefined, token, serverUrl).catch((e: unknown) => {
+                if ((e as {status?: number})?.status === 404) {
+                    roomsCrudSupported = false;
+                    throw makeRoomsCrudUnsupportedError();
+                }
+                throw e;
+            })),
 
     getRecurringSlots: (token: string, serverUrl?: string) =>
         request<RecurringSlot[]>('GET', '/api/recurring', undefined, token, serverUrl),

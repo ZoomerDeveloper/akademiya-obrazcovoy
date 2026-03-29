@@ -5,6 +5,7 @@ import {withDatabase, withObservables} from '@nozbe/watermelondb/react';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Modal,
     Platform,
@@ -16,7 +17,6 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {fetchPostsForChannel} from '@actions/remote/post';
 import CompassIcon from '@components/compass_icon';
 import {useResolvedServerUrl} from '@hooks/use_resolved_server_url';
 import {useTheme} from '@context/theme';
@@ -136,6 +136,27 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
         color: theme.centerChannelColor,
         fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     },
+    headerActionsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 12,
+    },
+    headerActionChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        backgroundColor: changeOpacity(theme.centerChannelColor, 0.07),
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+    },
+    headerActionChipText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: changeOpacity(theme.centerChannelColor, 0.65),
+    },
     tabRow: {
         flexDirection: 'row',
         backgroundColor: theme.centerChannelBg,
@@ -245,11 +266,26 @@ function getGreeting(): string {
     return 'Добрый вечер';
 }
 
+function getApiBase(serverUrl: string): string {
+    const t = serverUrl.trim().replace(/\/$/, '');
+    if (!/^http:\/\//i.test(t)) {
+        return t;
+    }
+
+    const rest = t.replace(/^http:\/\//i, '');
+    if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(rest)) {
+        return t;
+    }
+
+    return `https://${rest}`;
+}
+
 function NewsFeedScreen({currentUser, teamId}: Props) {
     const theme = useTheme();
     const serverUrl = useResolvedServerUrl();
     const insets = useSafeAreaInsets();
     const style = getStyleSheet(theme);
+    const apiBaseUrl = useMemo(() => getApiBase(serverUrl), [serverUrl]);
 
     const [activeTab, setActiveTab] = useState(STUDENT_CHANNEL);
     const [showAfisha, setShowAfisha] = useState(false);
@@ -312,7 +348,7 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
         setLoadError((prev) => ({...prev, [channelName]: ''}));
         try {
             const chResp = await fetchWithRetry(
-                `${serverUrl}/api/v4/teams/${teamId}/channels/name/${channelName}`,
+                `${apiBaseUrl}/api/v4/teams/${teamId}/channels/name/${channelName}`,
                 {headers: {Authorization: `Bearer ${sessionToken}`}},
                 {retries: 2, timeoutMs: 10000, retryDelayMs: 500},
             );
@@ -325,8 +361,19 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
                 return;
             }
             setChannelIds((prev) => ({...prev, [channelName]: channel.id}));
-            const result = await fetchPostsForChannel(serverUrl, channel.id);
-            if (result?.posts) {
+            const postsResp = await fetchWithRetry(
+                `${apiBaseUrl}/api/v4/channels/${channel.id}/posts?page=0&per_page=100&collapsedThreads=false&collapsedThreadsExtended=false`,
+                {headers: {Authorization: `Bearer ${sessionToken}`}},
+                {retries: 2, timeoutMs: 10000, retryDelayMs: 500},
+            );
+
+            if (!postsResp.ok) {
+                setLoadError((prev) => ({...prev, [channelName]: 'Не удалось загрузить посты канала. Попробуйте еще раз.'}));
+                return;
+            }
+
+            const result = await postsResp.json();
+            if (result?.posts && typeof result.posts === 'object') {
                 const postList = Object.values(result.posts as Record<string, Post>)
                     .filter((p) => !p.type || p.type === '')
                     .sort((a, b) => b.create_at - a.create_at);
@@ -338,7 +385,7 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
         } finally {
             setLoading((prev) => ({...prev, [channelName]: false}));
         }
-    }, [serverUrl, sessionToken, teamId]);
+    }, [apiBaseUrl, sessionToken, teamId]);
 
     useEffect(() => {
         fetchChannelPosts(activeTab);
@@ -394,8 +441,44 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
             post={item}
             channelId={channelIds[activeTab] || ''}
             theme={theme}
+            canDelete={isSystemAdmin}
+            onDelete={(postId) => {
+                Alert.alert(
+                    'Удалить пост?',
+                    'Это действие можно отменить только через восстановление из резервной копии.',
+                    [
+                        {text: 'Отмена', style: 'cancel'},
+                        {
+                            text: 'Удалить',
+                            style: 'destructive',
+                            onPress: async () => {
+                                try {
+                                    const resp = await fetchWithRetry(
+                                        `${apiBaseUrl}/api/v4/posts/${postId}`,
+                                        {
+                                            method: 'DELETE',
+                                            headers: {Authorization: `Bearer ${sessionToken}`},
+                                        },
+                                        {retries: 1, timeoutMs: 10000},
+                                    );
+                                    if (!resp.ok) {
+                                        Alert.alert('Ошибка', 'Не удалось удалить пост');
+                                        return;
+                                    }
+                                    setPosts((prev) => ({
+                                        ...prev,
+                                        [activeTab]: (prev[activeTab] || []).filter((p) => p.id !== postId),
+                                    }));
+                                } catch {
+                                    Alert.alert('Ошибка', 'Не удалось удалить пост');
+                                }
+                            },
+                        },
+                    ],
+                );
+            }}
         />
-    ), [channelIds, activeTab, theme]);
+    ), [channelIds, activeTab, theme, isSystemAdmin, apiBaseUrl, sessionToken]);
 
     const renderEmpty = () => (
         <View style={style.emptyContainer}>
@@ -411,29 +494,20 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
 
     return (
         <View style={[style.container, {paddingTop: insets.top}]}>
-            {/* Шапка с приветствием */}
-            <View style={[style.header, {flexDirection: 'row', alignItems: 'flex-end'}]}>
-                <View style={{flex: 1}}>
-                    <Text style={style.greeting}>{getGreeting()}</Text>
-                    <Text style={style.headerTitle}>
-                        {firstName ? `${firstName} 👋` : 'Академия Образцовой'}
-                    </Text>
-                </View>
-                <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
+            {/* Шапка: приветствие на всю ширину, действия — отдельной строкой ниже (без давления на имя) */}
+            <View style={style.header}>
+                <Text style={style.greeting}>{getGreeting()}</Text>
+                <Text style={style.headerTitle}>
+                    {firstName ? `${firstName} 👋` : 'Академия Образцовой'}
+                </Text>
+                <View style={style.headerActionsRow}>
                     {isStaff && (
                         <TouchableOpacity
                             onPress={() => setShowModeration(true)}
-                            style={{
-                                flexDirection: 'row', alignItems: 'center', gap: 5,
-                                backgroundColor: changeOpacity(theme.centerChannelColor, 0.07),
-                                borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
-                                marginBottom: 2,
-                            }}
+                            style={style.headerActionChip}
                         >
                             <CompassIcon name='account-multiple-plus-outline' size={16} color={changeOpacity(theme.centerChannelColor, 0.65)}/>
-                            <Text style={{fontSize: 12, fontWeight: '600', color: changeOpacity(theme.centerChannelColor, 0.65)}}>
-                                {'Модерация'}
-                            </Text>
+                            <Text style={style.headerActionChipText}>{'Модерация'}</Text>
                             {pendingDraftsCount > 0 && (
                                 <View
                                     style={{
@@ -456,32 +530,18 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
                     {isStaff && (
                         <TouchableOpacity
                             onPress={() => setShowCreatePost(true)}
-                            style={{
-                                flexDirection: 'row', alignItems: 'center', gap: 5,
-                                backgroundColor: changeOpacity(theme.centerChannelColor, 0.07),
-                                borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
-                                marginBottom: 2,
-                            }}
+                            style={style.headerActionChip}
                         >
                             <CompassIcon name='plus' size={16} color={changeOpacity(theme.centerChannelColor, 0.65)}/>
-                            <Text style={{fontSize: 12, fontWeight: '600', color: changeOpacity(theme.centerChannelColor, 0.65)}}>
-                                {'Пост'}
-                            </Text>
+                            <Text style={style.headerActionChipText}>{'Пост'}</Text>
                         </TouchableOpacity>
                     )}
                     <TouchableOpacity
                         onPress={() => setShowAfisha(true)}
-                        style={{
-                            flexDirection: 'row', alignItems: 'center', gap: 5,
-                            backgroundColor: changeOpacity(theme.centerChannelColor, 0.07),
-                            borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
-                            marginBottom: 2,
-                        }}
+                        style={style.headerActionChip}
                     >
                         <CompassIcon name='calendar-check-outline' size={16} color={changeOpacity(theme.centerChannelColor, 0.65)}/>
-                        <Text style={{fontSize: 12, fontWeight: '600', color: changeOpacity(theme.centerChannelColor, 0.65)}}>
-                            {'Афиша'}
-                        </Text>
+                        <Text style={style.headerActionChipText}>{'Афиша'}</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -490,6 +550,7 @@ function NewsFeedScreen({currentUser, teamId}: Props) {
             <CreateNewsPostModal
                 visible={showCreatePost}
                 onDismiss={() => setShowCreatePost(false)}
+                serverUrl={serverUrl}
                 channelId={channelIds[activeTab] || ''}
                 channelName={activeTab}
                 currentUserId={currentUser?.id || ''}

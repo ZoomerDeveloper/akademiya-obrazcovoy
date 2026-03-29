@@ -1,7 +1,7 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -16,14 +16,16 @@ import {
 } from 'react-native';
 
 import CompassIcon from '@components/compass_icon';
+import {ACADEMY_DEFAULT_SERVER_URL} from '@constants/academy';
 import {useServerUrl} from '@context/server';
 import {useTheme} from '@context/theme';
-import {getBookingServiceUrl} from '@utils/academy_service';
+import {getBookingServiceUrl, normalizeAcademyServerUrl} from '@utils/academy_service';
 import {fetchWithTimeout} from '@utils/fetch_utils';
 
 interface CreateNewsPostModalProps {
     visible: boolean;
     onDismiss: () => void;
+    serverUrl?: string;
     channelId: string;
     channelName: string;
     currentUserId: string;
@@ -40,13 +42,47 @@ interface ThemeProps {
     buttonColor: string;
 }
 
-async function readErrorMessage(resp: Response, fallback: string) {
+async function readErrorMessage(resp: Response, fallback: string, requestUrl?: string) {
+    const text = await resp.text();
     try {
-        const data = await resp.json();
+        const data = JSON.parse(text) as {id?: string; message?: string; error?: string};
+        if (resp.status === 404 || data?.id === 'api.context.404.app_error') {
+            const suffix = requestUrl ? `\n\nURL: ${requestUrl}` : '';
+            return `Сервер вернул 404 (маршрут не найден).${suffix}`;
+        }
         return (data?.message || data?.error || fallback) as string;
     } catch {
+        if (resp.status === 404 || /не смогли найти страницу/i.test(text)) {
+            const suffix = requestUrl ? `\n\nURL: ${requestUrl}` : '';
+            return `Сервер вернул 404 (маршрут не найден).${suffix}`;
+        }
         return fallback;
     }
+}
+
+function getMattermostApiBase(raw: string): string {
+    const normalized = normalizeAcademyServerUrl(raw);
+    if (!normalized) {
+        return normalized;
+    }
+
+    // Keep custom subpaths, but strip academy service suffixes when they leak into serverUrl.
+    const withoutServiceSuffix = normalized.replace(/\/(booking-service|sms-auth-service)\/?$/i, '');
+    return withoutServiceSuffix.replace(/\/$/, '');
+}
+
+function toHttpsIfRemote(url: string): string | null {
+    const t = url.trim();
+    if (!/^http:\/\//i.test(t)) {
+        return null;
+    }
+
+    const rest = t.replace(/^http:\/\//i, '');
+    if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(rest)) {
+        return null;
+    }
+
+    return `https://${rest}`.replace(/\/$/, '');
 }
 
 function getStyleSheet(theme: ThemeProps) {
@@ -150,6 +186,7 @@ function getStyleSheet(theme: ThemeProps) {
 function CreateNewsPostModal({
     visible,
     onDismiss,
+    serverUrl: serverUrlProp,
     channelId,
     channelName,
     currentUserId,
@@ -159,7 +196,14 @@ function CreateNewsPostModal({
     onPostCreated,
 }: CreateNewsPostModalProps) {
     const theme = useTheme();
-    const serverUrl = useServerUrl();
+    const ctxServerUrl = useServerUrl();
+    const mattermostApiBase = useMemo(() => {
+        const raw = (serverUrlProp?.trim() || ctxServerUrl?.trim() || '');
+        if (raw) {
+            return getMattermostApiBase(raw);
+        }
+        return ACADEMY_DEFAULT_SERVER_URL;
+    }, [serverUrlProp, ctxServerUrl]);
     const style = getStyleSheet(theme);
 
     const [title, setTitle] = useState('');
@@ -183,8 +227,10 @@ function CreateNewsPostModal({
 
             if (isSystemAdmin) {
                 // Publish directly to Mattermost
-                const formatted = `## ${title}\n\n${body}`;
-                const resp = await fetchWithTimeout(`${serverUrl}/api/v4/posts`, {
+                const formatted = `${title}\n\n${body}`;
+                const primaryBase = toHttpsIfRemote(mattermostApiBase) || mattermostApiBase;
+                const publishUrl = `${primaryBase}/api/v4/posts`;
+                let resp = await fetchWithTimeout(publishUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -196,15 +242,35 @@ function CreateNewsPostModal({
                     }),
                 });
 
+                let effectiveUrl = publishUrl;
+                if (resp.status === 404) {
+                    const httpsBase = toHttpsIfRemote(primaryBase);
+                    if (httpsBase) {
+                        effectiveUrl = `${httpsBase}/api/v4/posts`;
+                        resp = await fetchWithTimeout(effectiveUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${sessionToken}`,
+                            },
+                            body: JSON.stringify({
+                                channel_id: channelId,
+                                message: formatted,
+                            }),
+                        });
+                    }
+                }
+
                 if (!resp.ok) {
-                    throw new Error(await readErrorMessage(resp, 'Не удалось опубликовать пост'));
+                    throw new Error(await readErrorMessage(resp, 'Не удалось опубликовать пост', effectiveUrl));
                 }
 
                 Alert.alert('Успешно', 'Пост опубликован');
             } else {
                 // Send to moderation queue (booking_service)
-                const formatted = `## ${title}\n\n${body}`;
-                const resp = await fetchWithTimeout(`${getBookingServiceUrl(serverUrl)}/api/post-drafts`, {
+                const formatted = `${title}\n\n${body}`;
+                const moderationUrl = `${getBookingServiceUrl(serverUrlProp || ctxServerUrl)}/api/post-drafts`;
+                const resp = await fetchWithTimeout(moderationUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -222,7 +288,7 @@ function CreateNewsPostModal({
                 });
 
                 if (!resp.ok) {
-                    throw new Error(await readErrorMessage(resp, 'Не удалось отправить пост на модерацию'));
+                    throw new Error(await readErrorMessage(resp, 'Не удалось отправить пост на модерацию', moderationUrl));
                 }
 
                 Alert.alert('Успешно', 'Пост отправлен на модерацию');
@@ -238,7 +304,7 @@ function CreateNewsPostModal({
         } finally {
             setIsSubmitting(false);
         }
-    }, [isValid, isSubmitting, title, body, isSystemAdmin, serverUrl, currentUserId, authorName, channelId, channelName, sessionToken, onPostCreated, onDismiss]);
+    }, [isValid, isSubmitting, title, body, isSystemAdmin, mattermostApiBase, serverUrlProp, ctxServerUrl, currentUserId, authorName, channelId, channelName, sessionToken, onPostCreated, onDismiss]);
 
     return (
         <Modal

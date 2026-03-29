@@ -118,6 +118,7 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
 function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props) {
     const style = getStyleSheet(theme);
     const [rooms, setRooms] = useState<RoomInfo[]>([]);
+    const [roomsCrudSupported, setRoomsCrudSupported] = useState(true);
     const [loading, setLoading] = useState(true);
     const [editorOpen, setEditorOpen] = useState(false);
     const [creating, setCreating] = useState(false);
@@ -136,9 +137,11 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
         try {
             const rows = await bookingApi.getRooms(userToken, serverUrl);
             setRooms(Array.isArray(rows) ? rows : []);
+            setRoomsCrudSupported(bookingApi.getRoomsCrudSupportState() !== false);
         } catch (e) {
             Alert.alert('Ошибка', e instanceof Error ? e.message : 'Не удалось загрузить классы');
             setRooms([]);
+            setRoomsCrudSupported(bookingApi.getRoomsCrudSupportState() !== false);
         } finally {
             setLoading(false);
         }
@@ -149,6 +152,13 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
     }, [load]);
 
     const openNew = useCallback(() => {
+        if (!roomsCrudSupported) {
+            Alert.alert(
+                'Недоступно',
+                'Создание классов отключено: сервер не поддерживает маршруты /api/rooms. Обновите booking_service на сервере.',
+            );
+            return;
+        }
         setCreating(true);
         setEditId('');
         setName('');
@@ -158,9 +168,16 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
         setColor('#1a1a35');
         setSortOrder('');
         setEditorOpen(true);
-    }, []);
+    }, [roomsCrudSupported]);
 
     const openEdit = useCallback((r: RoomInfo) => {
+        if (!roomsCrudSupported) {
+            Alert.alert(
+                'Недоступно',
+                'Редактирование классов отключено: сервер не поддерживает маршруты /api/rooms.',
+            );
+            return;
+        }
         setCreating(false);
         setEditId(r.id);
         setName(r.name);
@@ -170,7 +187,7 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
         setColor(r.color || '#555555');
         setSortOrder(r.sort_order !== undefined ? String(r.sort_order) : '');
         setEditorOpen(true);
-    }, []);
+    }, [roomsCrudSupported]);
 
     const closeEditor = useCallback(() => {
         setEditorOpen(false);
@@ -231,6 +248,13 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
     }, [area, color, creating, editId, equipmentText, floor, load, name, onSaved, serverUrl, sortOrder, userToken, closeEditor]);
 
     const handleDelete = useCallback((r: RoomInfo) => {
+        if (!roomsCrudSupported) {
+            Alert.alert(
+                'Недоступно',
+                'Удаление классов отключено: сервер не поддерживает маршруты /api/rooms.',
+            );
+            return;
+        }
         Alert.alert(
             'Удалить класс?',
             `${r.name} (${r.id})`,
@@ -251,7 +275,7 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
                 },
             ],
         );
-    }, [load, onSaved, serverUrl, userToken]);
+    }, [load, onSaved, roomsCrudSupported, serverUrl, userToken]);
 
     if (loading) {
         return (
@@ -314,6 +338,11 @@ function RoomsAdminScreen({userToken, serverUrl, theme, onClose, onSaved}: Props
                 <Text style={style.hint}>
                     {'Справочник аудиторий для бронирования. Удаление возможно, только если нет активных заявок (pending / approved).'}
                 </Text>
+                {!roomsCrudSupported && (
+                    <Text style={style.hint}>
+                        {'Режим только чтение: сервер не поддерживает создание/редактирование классов (/api/rooms).'}
+                    </Text>
+                )}
                 {rooms.length === 0 ? (
                     <View style={style.empty}>
                         <Text style={style.emptyText}>

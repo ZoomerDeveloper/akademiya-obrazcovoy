@@ -44,7 +44,7 @@ import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
 import type {WithDatabaseArgs} from '@typings/database/database';
 import type UserModel from '@typings/database/models/servers/user';
 
-// ─────────────────────────── Демо-расписание ─────────────────────────────────
+// ─────────────────────────── Типы данных ────────────────────────────────────
 
 type Lesson = {
     id: string;
@@ -55,19 +55,6 @@ type Lesson = {
     day: string;
     isToday: boolean;
 }
-
-const DEMO_LESSONS_STUDENT: Lesson[] = [
-    {id: 'l1', subject: 'Фортепиано', teacher: 'М. Иванова', room: 'Класс № 1', time: '14:00 – 15:30', day: 'Сегодня', isToday: true},
-    {id: 'l2', subject: 'Сольфеджио', teacher: 'А. Петрова', room: 'Класс № 3', time: '16:00 – 17:00', day: 'Сегодня', isToday: true},
-    {id: 'l3', subject: 'История музыки', teacher: 'В. Соколов', room: 'Класс № 5', time: '11:00 – 12:30', day: 'Завтра', isToday: false},
-    {id: 'l4', subject: 'Ансамбль', teacher: 'М. Иванова', room: 'Репет. зал', time: '15:00 – 17:00', day: 'Ср', isToday: false},
-];
-
-const DEMO_LESSONS_TEACHER: Lesson[] = [
-    {id: 't1', subject: 'Иванов А. — Фортепиано', teacher: '', room: 'Класс № 1', time: '10:00 – 11:30', day: 'Сегодня', isToday: true},
-    {id: 't2', subject: 'Сидорова М. — Фортепиано', teacher: '', room: 'Класс № 1', time: '14:00 – 15:30', day: 'Сегодня', isToday: true},
-    {id: 't3', subject: 'Козлов Д. — Фортепиано', teacher: '', room: 'Класс № 2', time: '09:00 – 10:30', day: 'Завтра', isToday: false},
-];
 
 // ─────────────────────────── Быстрые действия ────────────────────────────────
 
@@ -436,18 +423,15 @@ function AcademyProfileScreen({currentUser}: Props) {
     }, [userId, sessionToken, serverUrl]);
 
     const lessons = useMemo(() => {
-        if (myBookings.length > 0) {
-            return myBookings.map((booking) => ({
-                id: booking.id,
-                subject: booking.purpose || (isStaff ? `Бронирование — ${booking.user_name}` : 'Занятие'),
-                teacher: isStaff ? booking.user_name : 'Академия',
-                room: booking.room_name,
-                time: `${booking.start_time} – ${booking.end_time}`,
-                day: formatDateLabel(booking.date),
-                isToday: formatDateLabel(booking.date) === 'Сегодня',
-            }));
-        }
-        return isStaff ? DEMO_LESSONS_TEACHER : DEMO_LESSONS_STUDENT;
+        return myBookings.map((booking) => ({
+            id: booking.id,
+            subject: booking.purpose || (isStaff ? `Бронирование — ${booking.user_name}` : 'Занятие'),
+            teacher: isStaff ? booking.user_name : 'Академия',
+            room: booking.room_name,
+            time: `${booking.start_time} – ${booking.end_time}`,
+            day: formatDateLabel(booking.date),
+            isToday: formatDateLabel(booking.date) === 'Сегодня',
+        }));
     }, [isStaff, myBookings]);
     const todayLessons = lessons.filter((l) => l.isToday);
     const upcomingLessons = lessons.filter((l) => !l.isToday);
@@ -749,6 +733,42 @@ function AcademyProfileScreen({currentUser}: Props) {
                             </TouchableOpacity>
                         </View>
                         {upcomingLessons.slice(0, 3).map(renderLesson)}
+                    </View>
+                )}
+
+                {/* Пустое состояние если нет занятий и данные загрузились */}
+                {bookingsLoaded && lessons.length === 0 && (
+                    <View style={style.section}>
+                        <View style={{
+                            backgroundColor: changeOpacity(theme.centerChannelColor, 0.04),
+                            borderRadius: 12,
+                            padding: 24,
+                            alignItems: 'center',
+                            borderWidth: StyleSheet.hairlineWidth,
+                            borderColor: changeOpacity(theme.centerChannelColor, 0.08),
+                        }}>
+                            <CompassIcon
+                                name='calendar-blank-outline'
+                                size={48}
+                                color={changeOpacity(theme.centerChannelColor, 0.3)}
+                                style={{marginBottom: 12}}
+                            />
+                            <Text style={{
+                                fontSize: 16,
+                                fontWeight: '600',
+                                color: theme.centerChannelColor,
+                                marginBottom: 6,
+                            }}>
+                                Нет запланированных занятий
+                            </Text>
+                            <Text style={{
+                                fontSize: 13,
+                                color: changeOpacity(theme.centerChannelColor, 0.5),
+                                textAlign: 'center',
+                            }}>
+                                Ваше расписание пусто. Посетите раздел «Расписание» чтобы записаться на занятия.
+                            </Text>
+                        </View>
                     </View>
                 )}
 

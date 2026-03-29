@@ -28,6 +28,7 @@ import {
     type ViewStyle,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Svg, {parse, SvgAst} from 'react-native-svg';
 
 import CompassIcon from '@components/compass_icon';
 import {useServerUrl} from '@context/server';
@@ -36,7 +37,7 @@ import {getServerCredentials} from '@init/credentials';
 import {observeCurrentUser} from '@queries/servers/user';
 import {getAcademyRoleFlags} from '@utils/academy_roles';
 import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
-import {exportAfishaAsImage, shareAfishaImage} from '@utils/afisha_export';
+import {exportAfishaAsImage, generateAfishaSVG, shareAfishaImage} from '@utils/afisha_export';
 
 import type {WithDatabaseArgs} from '@typings/database/database';
 import type UserModel from '@typings/database/models/servers/user';
@@ -393,7 +394,29 @@ const getFormStyle = makeStyleSheetFromTheme((theme: Theme) => ({
         borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 10,
     },
     channelNoteText: {fontSize: 12, color: changeOpacity(theme.centerChannelColor, 0.6), flex: 1},
+    exportHidden: {
+        position: 'absolute',
+        left: -10000,
+        top: -10000,
+        width: 900,
+        height: 1200,
+        opacity: 0,
+    },
 }));
+
+function getApiBase(serverUrl: string): string {
+    const t = serverUrl.trim().replace(/\/$/, '');
+    if (!/^http:\/\//i.test(t)) {
+        return t;
+    }
+
+    const rest = t.replace(/^http:\/\//i, '');
+    if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(rest)) {
+        return t;
+    }
+
+    return `https://${rest}`;
+}
 
 function CreateAfishaModal({
     userId, userName, userToken, serverUrl, theme, onClose, onPublished,
@@ -412,12 +435,46 @@ function CreateAfishaModal({
     const [extraValues, setExtraValues] = useState<Record<string, string>>({});
     const [publishing, setPublishing] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [exportAst, setExportAst] = useState<ReturnType<typeof parse> | null>(null);
+    const exportSvgRef = useRef<Svg | null>(null);
 
     const selectTemplate = useCallback((tmpl: AfishaTemplate) => {
         setSelectedTemplate(tmpl);
         setTitle(tmpl.defaultTitle);
         setDescription(tmpl.defaultDescription);
         setExtraValues({});
+    }, []);
+
+    const waitForRender = useCallback(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }, []);
+
+    const renderPngBase64 = useCallback(async () => {
+        const svgNode = exportSvgRef.current as unknown as {
+            toDataURL: (
+                callback: (base64: string) => void,
+                options?: {width: number; height: number},
+            ) => void;
+        } | null;
+
+        if (!svgNode?.toDataURL) {
+            throw new Error('Рендер PNG недоступен на этом устройстве');
+        }
+
+        return new Promise<string>((resolve, reject) => {
+            try {
+                svgNode.toDataURL((base64) => {
+                    if (base64) {
+                        resolve(base64);
+                    } else {
+                        reject(new Error('Пустой PNG после рендера'));
+                    }
+                }, {width: 900, height: 1200});
+            } catch {
+                reject(new Error('Не удалось отрендерить PNG'));
+            }
+        });
     }, []);
 
     const handleExport = useCallback(async () => {
@@ -428,20 +485,41 @@ function CreateAfishaModal({
         setExporting(true);
 
         try {
-            const exportPath = await exportAfishaAsImage(
-                {
-                    emoji: selectedTemplate.emoji,
-                    title: title.trim(),
-                    description: description.trim(),
-                    date,
-                    time,
-                    venue,
-                    ticket: extraValues['Входной билет'] || extraValues['Цена входа'] || '',
-                    authorName: userName,
-                },
+            const afishaData = {
+                emoji: selectedTemplate.emoji,
+                title: title.trim(),
+                description: description.trim(),
+                date,
+                time,
+                venue,
+                ticket: extraValues['Входной билет'] || extraValues['Цена входа'] || '',
+                authorName: userName,
+            };
+
+            const svgMarkup = generateAfishaSVG(
+                afishaData,
                 selectedTemplate.color,
                 selectedTemplate.accent,
-                'svg', // Экспортируем как SVG (все платформы поддерживают)
+            );
+
+            let parsedAst: ReturnType<typeof parse> | null = null;
+            try {
+                parsedAst = parse(svgMarkup);
+            } catch {
+                Alert.alert('Ошибка экспорта', 'Не удалось подготовить шаблон для PNG');
+                return;
+            }
+
+            setExportAst(parsedAst);
+            await waitForRender();
+            const pngBase64 = await renderPngBase64();
+
+            const exportPath = await exportAfishaAsImage(
+                afishaData,
+                selectedTemplate.color,
+                selectedTemplate.accent,
+                'png',
+                pngBase64,
             );
 
             if (exportPath) {
@@ -457,13 +535,29 @@ function CreateAfishaModal({
         } catch (err) {
             Alert.alert('Ошибка экспорта', (err as Error).message);
         } finally {
+            setExportAst(null);
             setExporting(false);
         }
-    }, [title, description, selectedTemplate, extraValues, date, time, venue, userName]);
+    }, [
+        title,
+        description,
+        selectedTemplate,
+        extraValues,
+        date,
+        time,
+        venue,
+        userName,
+        waitForRender,
+        renderPngBase64,
+    ]);
 
     const handlePublish = useCallback(async () => {
         if (!title.trim() || !date.trim()) {
             Alert.alert('Заполните название и дату');
+            return;
+        }
+        if (!userToken) {
+            Alert.alert('Ошибка публикации', 'Нет активной сессии. Войдите заново.');
             return;
         }
         setPublishing(true);
@@ -494,16 +588,29 @@ function CreateAfishaModal({
         ].join('\n');
 
         try {
+            const apiBase = getApiBase(serverUrl);
+
             // Получаем список команд для поиска канала afisha
-            const teamsRes = await fetch(`${serverUrl}/api/v4/teams`, {
+            const teamsRes = await fetch(`${apiBase}/api/v4/teams`, {
                 headers: {Authorization: `Bearer ${userToken}`},
             });
+
+            if (!teamsRes.ok) {
+                throw new Error('Не удалось получить список команд');
+            }
+
             const teams = await teamsRes.json();
+            if (!Array.isArray(teams)) {
+                throw new Error('Неожиданный ответ сервера при загрузке команд');
+            }
 
             let channelId = '';
             for (const team of teams) {
+                if (!team?.id) {
+                    continue;
+                }
                 const chRes = await fetch(
-                    `${serverUrl}/api/v4/teams/${team.id}/channels/name/afisha`,
+                    `${apiBase}/api/v4/teams/${team.id}/channels/name/afisha`,
                     {headers: {Authorization: `Bearer ${userToken}`}},
                 );
                 if (chRes.ok) {
@@ -515,11 +622,15 @@ function CreateAfishaModal({
 
             if (!channelId) { throw new Error('Канал #afisha не найден'); }
 
-            await fetch(`${serverUrl}/api/v4/posts`, {
+            const publishRes = await fetch(`${apiBase}/api/v4/posts`, {
                 method: 'POST',
                 headers: {'Authorization': `Bearer ${userToken}`, 'Content-Type': 'application/json'},
                 body: JSON.stringify({channel_id: channelId, message: postText}),
             });
+
+            if (!publishRes.ok) {
+                throw new Error('Не удалось опубликовать пост в #afisha');
+            }
 
             onPublished(newEvent);
             Alert.alert('✅ Опубликовано!', 'Афиша опубликована в канал #afisha и добавлена в ленту.');
@@ -632,6 +743,19 @@ function CreateAfishaModal({
                     <Text style={style.channelNoteText}>{'Афиша будет опубликована в канал #afisha и появится в ленте новостей'}</Text>
                 </View>
             </ScrollView>
+
+            {exportAst && (
+                <View pointerEvents='none' style={style.exportHidden}>
+                    <SvgAst
+                        ast={exportAst}
+                        override={{
+                            width: 900,
+                            height: 1200,
+                            ref: exportSvgRef,
+                        }}
+                    />
+                </View>
+            )}
         </SafeAreaView>
     );
 }

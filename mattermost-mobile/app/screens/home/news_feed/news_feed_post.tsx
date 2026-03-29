@@ -2,8 +2,9 @@
 // See LICENSE.txt for license information.
 
 import React, {useMemo} from 'react';
-import {Platform, StyleSheet, Text, View} from 'react-native';
+import {Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import CompassIcon from '@components/compass_icon';
 import {changeOpacity, makeStyleSheetFromTheme} from '@utils/theme';
 
 type Post = {
@@ -17,6 +18,8 @@ type Props = {
     post: Post;
     channelId: string;
     theme: Theme;
+    canDelete?: boolean;
+    onDelete?: (postId: string) => void;
 }
 
 const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
@@ -56,6 +59,12 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
     metaContainer: {
         flex: 1,
     },
+    actions: {
+        marginLeft: 8,
+    },
+    deleteIcon: {
+        padding: 4,
+    },
     authorName: {
         fontSize: 13,
         fontWeight: '600',
@@ -79,6 +88,13 @@ const getStyleSheet = makeStyleSheetFromTheme((theme: Theme) => ({
     },
 }));
 
+const normalizeMessageForFeed = (message: string): string => {
+    if (!message) {
+        return '';
+    }
+    return message.replace(/^\s*#{1,6}\s+/m, '').trim();
+};
+
 const formatTimestamp = (ms: number): string => {
     const date = new Date(ms);
     const now = new Date();
@@ -98,12 +114,14 @@ const formatTimestamp = (ms: number): string => {
     return `${day}.${month}.${year}`;
 };
 
-function NewsFeedPost({post, theme}: Props) {
+function NewsFeedPost({post, theme, canDelete, onDelete}: Props) {
     const style = getStyleSheet(theme);
 
     const initials = useMemo(() => {
         return post.user_id.slice(0, 2).toUpperCase();
     }, [post.user_id]);
+
+    const cleanedMessage = useMemo(() => normalizeMessageForFeed(post.message), [post.message]);
 
     return (
         <View style={style.card}>
@@ -122,8 +140,24 @@ function NewsFeedPost({post, theme}: Props) {
                         {formatTimestamp(post.create_at)}
                     </Text>
                 </View>
+                {canDelete && onDelete && (
+                    <View style={style.actions}>
+                        <TouchableOpacity
+                            onPress={() => onDelete(post.id)}
+                            style={style.deleteIcon}
+                            accessibilityRole='button'
+                            accessibilityLabel='Удалить пост'
+                        >
+                            <CompassIcon
+                                name='trash-can-outline'
+                                size={18}
+                                color={changeOpacity(theme.centerChannelColor, 0.6)}
+                            />
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
-            <Text style={style.message}>{post.message}</Text>
+            <Text style={style.message}>{cleanedMessage}</Text>
         </View>
     );
 }

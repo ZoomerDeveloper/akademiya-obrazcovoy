@@ -26,8 +26,8 @@ interface AfishaPreviewProps {
 const getStyleSheet = () => ({
     container: {
         backgroundColor: '#ffffff',
-        width: 800,
-        height: 1100,
+        width: 900,
+        height: 1200,
         padding: 40,
         flexDirection: 'column' as const,
     },
@@ -128,7 +128,7 @@ const getStyleSheet = () => ({
 });
 
 /**
- * Афиша компонент для экспорта в PNG (800x1100)
+ * Афиша компонент для экспорта в портретном формате 3:4 (900x1200)
  */
 function AfishaPreview({data}: AfishaPreviewProps) {
     const style = getStyleSheet();
