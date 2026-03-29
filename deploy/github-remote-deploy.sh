@@ -29,6 +29,7 @@ academy_restart_service_fallback() {
     local ENTRY="$3"
     local PM2_NAME="$4"
     local LOG_FILE="$5"
+    local PORT="$6"
 
     if [[ ! -f "$DIR/$ENTRY" ]]; then
         echo "ℹ $NAME: entry not found ($DIR/$ENTRY), skip"
@@ -43,13 +44,51 @@ academy_restart_service_fallback() {
         return 0
     fi
 
-    # Fallback without pm2/systemd: restart node process by path pattern.
+    # Fallback without pm2/systemd: hard stop stale process and free service port.
     pkill -f "$DIR/$ENTRY" 2>/dev/null || true
+    pkill -f "/booking_service/.*server.js" 2>/dev/null || true
+    pkill -f "/sms_auth/.*server.js" 2>/dev/null || true
+    if command -v lsof >/dev/null 2>&1; then
+        local pids
+        pids=$(lsof -ti tcp:"$PORT" 2>/dev/null || true)
+        if [[ -n "$pids" ]]; then
+            echo "   $NAME: killing stale PID(s) on :$PORT → $pids"
+            kill $pids 2>/dev/null || true
+            sleep 1
+            pids=$(lsof -ti tcp:"$PORT" 2>/dev/null || true)
+            if [[ -n "$pids" ]]; then
+                kill -9 $pids 2>/dev/null || true
+            fi
+        fi
+    fi
     (
         cd "$DIR"
         nohup node -r dotenv/config "$ENTRY" > "$LOG_FILE" 2>&1 &
     )
+    sleep 1
+    if command -v lsof >/dev/null 2>&1; then
+        local newpids
+        newpids=$(lsof -ti tcp:"$PORT" 2>/dev/null || true)
+        if [[ -n "$newpids" ]]; then
+            echo "   $NAME: now listening on :$PORT (PID: $newpids)"
+        else
+            echo "   $NAME: WARNING no listener on :$PORT after restart, check $LOG_FILE"
+        fi
+    fi
     echo "   $NAME: restarted via nohup (log: $LOG_FILE)"
+}
+
+academy_validate_booking_source() {
+    local FILE="$ROOT/booking_service/server.js"
+    if [[ ! -f "$FILE" ]]; then
+        echo "⚠ booking source missing: $FILE"
+        return 0
+    fi
+    if grep -q "app.get('/api/rooms'" "$FILE"; then
+        echo "→ source check: /api/rooms route is present in booking_service/server.js"
+    else
+        echo "⚠ source check: /api/rooms route NOT found in booking_service/server.js"
+    fi
 }
 
 if [[ -x /etc/academy/post-deploy.sh ]]; then
@@ -62,12 +101,14 @@ else
     echo "ℹ Нет хука перезапуска"
 fi
 
+academy_validate_booking_source
+
 if [[ "${ACADEMY_SKIP_FALLBACK_RESTART:-0}" == "1" ]]; then
     echo "ℹ ACADEMY_SKIP_FALLBACK_RESTART=1 — fallback restart пропущен"
 else
     echo "→ fallback restart microservices"
-    academy_restart_service_fallback "Booking Service" "$ROOT/booking_service" "server.js" "academy-booking" "/tmp/mm-booking.log"
-    academy_restart_service_fallback "SMS Auth Service" "$ROOT/sms_auth" "server.js" "academy-sms" "/tmp/mm-smsauth.log"
+    academy_restart_service_fallback "Booking Service" "$ROOT/booking_service" "server.js" "academy-booking" "/tmp/mm-booking.log" "3001"
+    academy_restart_service_fallback "SMS Auth Service" "$ROOT/sms_auth" "server.js" "academy-sms" "/tmp/mm-smsauth.log" "3002"
 fi
 
 # ── Nginx: сниппет booking / sms (^~ чтобы не перехватывал location ~ /api/ у Mattermost) ──
