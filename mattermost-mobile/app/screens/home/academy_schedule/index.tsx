@@ -416,7 +416,7 @@ const getGridStyle = makeStyleSheetFromTheme((theme: Theme) => ({
     legendDot: {width: 12, height: 12, borderRadius: 3},
     legendText: {fontSize: 11, color: changeOpacity(theme.centerChannelColor, 0.6)},
     gridScroll: {flex: 1},
-    gridScrollContent: {paddingLeft: 52, paddingBottom: 20},
+    gridScrollContent: {paddingLeft: 64, paddingBottom: 20},
     grid: {flexDirection: 'column'},
     dayHeaderRow: {flexDirection: 'row', marginBottom: 4},
     dayHeader: {
@@ -427,11 +427,11 @@ const getGridStyle = makeStyleSheetFromTheme((theme: Theme) => ({
     dayHeaderText: {fontSize: 12, fontWeight: '600', color: changeOpacity(theme.centerChannelColor, 0.5)},
     row: {flexDirection: 'row', alignItems: 'center', marginBottom: 2},
     timeLabel: {
-        width: 48,
+        width: 56,
         position: 'absolute',
-        left: -48,
+        left: -56,
         alignItems: 'flex-end',
-        paddingRight: 8,
+        paddingRight: 12,
     },
     timeLabelText: {fontSize: 10, color: changeOpacity(theme.centerChannelColor, 0.4)},
     slot: {
