@@ -24,6 +24,14 @@ on:
         description: 'Ветка для выкладки'
         required: true
         default: 'main'
+      seed_lessons:
+        description: 'Заполнить БД тестовыми уроками на сегодня+2 дня'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
   push:
     branches:
       - main
@@ -46,17 +54,19 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.ref_name }}
+          SEED_LESSONS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.seed_lessons || 'false' }}
         with:
           host: ${{ secrets.ACADEMY_SSH_HOST }}
           username: ${{ secrets.ACADEMY_SSH_USER }}
           key: ${{ secrets.ACADEMY_SSH_PRIVATE_KEY }}
           port: ${{ secrets.ACADEMY_SSH_PORT != '' && secrets.ACADEMY_SSH_PORT || 22 }}
-          envs: DEPLOY_BRANCH
+          envs: DEPLOY_BRANCH,SEED_LESSONS
           script_stop: true
           script: |
             set -euo pipefail
             cd "${{ secrets.ACADEMY_DEPLOY_PATH }}"
             export DEPLOY_BRANCH
+            export SEED_LESSONS
             git fetch --prune origin "$DEPLOY_BRANCH"
             git checkout "$DEPLOY_BRANCH"
             git reset --hard "origin/$DEPLOY_BRANCH"
