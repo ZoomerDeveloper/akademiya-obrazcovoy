@@ -155,6 +155,10 @@ function buildWeekSchedule(
     recurring: RecurringSlot[],
 ): Record<string, SlotStatus> {
     const schedule: Record<string, SlotStatus> = {};
+    const now = new Date();
+    const today = toISODate(now);
+    const currentTimeMin = timeToMinutes(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+
     for (let di = 0; di < WEEK_DAYS.length; di++) {
         const dayDate = addDaysDate(weekMonday, di);
         const dateStr = toISODate(dayDate);
@@ -163,6 +167,11 @@ function buildWeekSchedule(
         for (const time of TIME_SLOTS) {
             const key = `${WEEK_DAYS[di]}-${time}`;
             const slotEnd = endOfHourSlot(time);
+            const slotStartMin = timeToMinutes(time);
+            
+            // Проверяем, прошел ли уже этот слот
+            const isPassed = dateStr === today && currentTimeMin >= slotStartMin;
+            
             let hasMy = false;
             let hasOcc = false;
 
@@ -191,7 +200,9 @@ function buildWeekSchedule(
                 }
             }
 
-            if (hasMy) {
+            if (isPassed) {
+                schedule[key] = 'occupied';
+            } else if (hasMy) {
                 schedule[key] = 'my';
             } else if (hasOcc) {
                 schedule[key] = 'occupied';
